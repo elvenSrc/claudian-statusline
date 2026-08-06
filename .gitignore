@@ -1,0 +1,7 @@
+# Lokale Plugin-Einstellungen (entstehen erst, wenn das Plugin in einem
+# echten Vault installiert/konfiguriert wird) – gehören nicht ins Repo.
+data.json
+
+# Diverses
+.DS_Store
+*.log

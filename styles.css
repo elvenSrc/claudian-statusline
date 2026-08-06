@@ -1,0 +1,59 @@
+/*
+ * Styling für die von claudian-statusline injizierte Statusline.
+ * Nutzt ausschließlich Obsidian-Theme-Variablen, damit es in jedem Theme
+ * (hell/dunkel, Community-Themes) stimmig aussieht.
+ */
+
+.claudian-statusline {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1px;
+  min-width: 0;
+  flex: 0 1 auto;
+  margin-inline-end: 10px;
+  padding-inline-end: 10px;
+  border-inline-end: 1px solid var(--background-modifier-border);
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text-muted);
+  cursor: default;
+  user-select: text;
+}
+
+.claudian-statusline-row {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Etwas dezenter als Zeile 2 hervorgehoben, da global/Account-weit statt
+   Tab-spezifisch. */
+.claudian-statusline-row-limits {
+  color: var(--text-muted);
+}
+
+.claudian-statusline-row-context {
+  color: var(--text-faint);
+}
+
+/* Fortschrittsbalken (optional, siehe Plugin-Einstellungen) mit
+   Grün/Orange/Rot-Eskalationsfarben. Die Füllfarbe wird per JS inline
+   gesetzt (abhängig von den konfigurierbaren Schwellwerten). */
+.claudian-statusline-bar {
+  display: inline-block;
+  vertical-align: middle;
+  width: 34px;
+  height: 6px;
+  margin: 0 3px;
+  border-radius: 3px;
+  background: var(--background-modifier-border);
+  overflow: hidden;
+}
+
+.claudian-statusline-bar-fill {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  transition: width 0.3s ease, background-color 0.3s ease;
+}
