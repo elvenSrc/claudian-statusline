@@ -49,7 +49,7 @@ const DEFAULT_SETTINGS = {
   thresholdOrange: 70, // ab hier orange (%)
   thresholdRed: 90, // ab hier rot (%)
   useLiveRateLimitApi: false, // inoffizieller Endpunkt, siehe oben – standardmäßig aus
-  // Aktivitätsgetrieben statt Dauerpolling (siehe noteClaudianActivity):
+  // Aktivitätsgetrieben statt Dauerpolling (siehe noteActivity):
   // liveApiRefreshSeconds gilt nur, SOLANGE gerade Traffic läuft.
   liveApiRefreshSeconds: 30,
   liveApiIdleStopSeconds: 20, // Ruhezeit ohne Datei-Aktivität, bis das Polling wieder pausiert
@@ -75,7 +75,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
     // Live-Rate-Limit-Abfrage (inoffizieller Endpunkt, siehe Dateikopf) –
     // standardmäßig aus, aktivitätsgetrieben statt Dauerpolling (siehe
-    // noteClaudianActivity/endLiveApiBurst weiter unten).
+    // noteActivity/endLiveApiBurst weiter unten).
     this.liveApiIntervalId = null;
     this.liveApiIdleTimer = null;
     this.liveApiActive = false;
@@ -146,11 +146,14 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
   // ---------- Live-Rate-Limit-Abfrage (optional, inoffiziell, aktivitätsgetrieben) ----------
   //
   // Statt permanent alle X Sekunden zu pollen (auch im Leerlauf, ohne dass
-  // sich etwas ändert), wird der Endpunkt nur abgefragt, WÄHREND in
-  // Claudian gerade wirklich etwas passiert. Erkannt wird das über die
-  // ohnehin vorhandenen fs.watch-Beobachter auf ".claudian/sessions" und dem
-  // Projekt-Transkript-Verzeichnis (siehe setupFsWatchers) – jeder
-  // Schreibzugriff dort gilt als "Aktivität":
+  // sich etwas ändert), wird der Endpunkt nur abgefragt, WÄHREND gerade
+  // wirklich Claude-Traffic läuft – egal ob über Claudian in diesem Vault
+  // oder über eine `claude`-Terminal-CLI-Session irgendwo auf dieser
+  // Maschine. Erkannt wird das über die ohnehin vorhandenen fs.watch-
+  // Beobachter auf ".claudian/sessions", dem Projekt-Transkript-Verzeichnis,
+  // ~/.claude selbst (statusline-cache.json) und ~/.claude/sessions/
+  // (globale Session-Registry, siehe setupFsWatchers) – jeder Schreibzugriff
+  // dort gilt als "Aktivität":
   //   1. Erste Aktivität → sofortiger Abruf + Interval-Polling (Sekunden
   //      aus liveApiRefreshSeconds), solange weitere Aktivität reinkommt.
   //   2. Kommt für liveApiIdleStopSeconds keine weitere Aktivität mehr rein
@@ -162,14 +165,14 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
   // ohnehin nicht ändert (abgesehen vom Reset-Zeitpunkt, der als fester
   // Text angezeigt wird, nicht live hochgezählt).
 
-  noteClaudianActivity() {
+  noteActivity() {
     if (!this.settings.useLiveRateLimitApi) return;
 
     if (this.liveApiIdleTimer) clearTimeout(this.liveApiIdleTimer);
 
     if (!this.liveApiActive) {
       this.liveApiActive = true;
-      this.log("Claudian-Aktivität erkannt, starte Live-Rate-Limit-Polling …");
+      this.log("Aktivität erkannt (Claudian oder CLI), starte Live-Rate-Limit-Polling …");
       this.fetchLiveRateLimits();
       const seconds = Math.max(15, this.settings.liveApiRefreshSeconds || DEFAULT_SETTINGS.liveApiRefreshSeconds);
       this.liveApiIntervalId = window.setInterval(() => this.fetchLiveRateLimits(), seconds * 1000);
@@ -322,14 +325,23 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     const claudeDir = this.getClaudeDir();
     const vaultBase = this.getVaultBasePath();
 
-    // isActivitySource = true nur für Verzeichnisse, deren Änderungen
-    // wirklich auf laufenden Claudian-Traffic hindeuten (Session-Meta bzw.
-    // Transkript dieses Vaults) – die triggern zusätzlich die
-    // aktivitätsgetriebene Live-API (siehe noteClaudianActivity). Der
-    // globale ~/.claude-Ordner und Claudians data.json (ändert sich z. B.
-    // schon beim bloßen Tab-Wechsel) lösen nur die normale
-    // Datei-Aktualisierung aus, keine Live-API-Polling-Bursts.
-    const targets = [{ dir: claudeDir, isActivitySource: false }];
+    // isActivitySource = true für Verzeichnisse, deren Änderungen auf
+    // laufenden Claude-Traffic hindeuten – das triggert zusätzlich die
+    // aktivitätsgetriebene Live-API (siehe noteActivity). Zwei
+    // Quellen dafür:
+    //   1. Claudian-Traffic in diesem Vault (Session-Meta/Transkript)
+    //   2. JEDE aktive `claude`-Terminal-CLI-Session, unabhängig von Vault
+    //      oder Projekt: ~/.claude selbst (dort landet statusline-cache.json,
+    //      die die CLI bei jeder eigenen Statusline-Aktualisierung berührt)
+    //      und ~/.claude/sessions/ (globale, prozessweite Session-Registry
+    //      für alle laufenden Claude-Code-Prozesse, CLI wie SDK, egal in
+    //      welchem Projekt).
+    // Nur Claudians eigene data.json (ändert sich z. B. schon beim bloßen
+    // Tab-Wechsel, ohne echten Traffic) bleibt bewusst ausgenommen.
+    const targets = [
+      { dir: claudeDir, isActivitySource: true },
+      { dir: path.join(claudeDir, "sessions"), isActivitySource: true },
+    ];
     if (vaultBase) {
       targets.push({
         dir: path.join(vaultBase, ".obsidian", "plugins", CLAUDIAN_PLUGIN_ID),
@@ -345,7 +357,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
         if (!fs.existsSync(dir)) continue;
         const watcher = fs.watch(dir, { persistent: false }, () => {
           this.scheduleFsRefresh();
-          if (isActivitySource) this.noteClaudianActivity();
+          if (isActivitySource) this.noteActivity();
         });
         watcher.on("error", () => {
           try {

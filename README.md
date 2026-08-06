@@ -108,10 +108,14 @@ a plain query, not a generation.
   automatically and silently falls back to the file-based values – no
   crash, no hard failure.
 - **Activity-driven instead of continuous polling.** It doesn't poll on a
-  fixed interval forever, but only while something is actually happening in
-  Claudian (detected via the same `fs.watch` watchers that also keep line 2
-  current – writes to `.claudian/sessions` or the transcript directory
-  count as activity):
+  fixed interval forever, but only while Claude traffic is actually
+  happening – whether through **Claudian in this vault** (writes to
+  `.claudian/sessions` or the transcript directory) or through a **`claude`
+  terminal CLI session running anywhere on this machine** (writes to
+  `~/.claude` itself, where `statusline-cache.json` gets touched on every
+  CLI statusline refresh, as well as to `~/.claude/sessions/`, the global,
+  process-wide registry of all running Claude Code sessions, regardless of
+  project or vault):
   1. First activity → immediate fetch, then polling at the configured
      interval (default: 30 s) as long as further activity keeps coming in.
   2. If no further activity arrives for the configured idle time (default:

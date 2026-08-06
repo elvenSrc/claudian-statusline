@@ -110,10 +110,14 @@ es ist eine reine Abfrage, keine Generation.
   Statusline automatisch und stillschweigend auf die Datei-basierten Werte
   zurück – kein Absturz, kein hartes Fehlverhalten.
 - **Aktivitätsgetrieben statt Dauerpolling.** Es wird nicht permanent im
-  Sekundentakt angefragt, sondern nur, während in Claudian gerade wirklich
-  etwas passiert (erkannt über dieselben fs.watch-Beobachter, die auch
-  Zeile 2 aktuell halten – Schreibzugriffe auf `.claudian/sessions` bzw. das
-  Transkript-Verzeichnis gelten als Aktivität):
+  Sekundentakt angefragt, sondern nur, während gerade wirklich Claude-Traffic
+  läuft – egal ob über **Claudian in diesem Vault** (Schreibzugriffe auf
+  `.claudian/sessions` bzw. das Transkript-Verzeichnis) oder über eine
+  **`claude`-Terminal-CLI-Session irgendwo auf dieser Maschine**
+  (Schreibzugriffe auf `~/.claude` selbst, wo `statusline-cache.json` bei
+  jeder eigenen CLI-Statusline-Aktualisierung berührt wird, sowie auf
+  `~/.claude/sessions/`, die globale, prozessweite Registry aller laufenden
+  Claude-Code-Sessions, unabhängig von Projekt oder Vault):
   1. Erste Aktivität → sofortiger Abruf, danach Polling im konfigurierten
      Intervall (Standard: 30 s), solange weitere Aktivität reinkommt.
   2. Bleibt für die konfigurierte Ruhezeit (Standard: 20 s) keine weitere
