@@ -46,8 +46,16 @@ const DEFAULT_SETTINGS = {
   // "off" = nur Text, "additional" = Balken zusätzlich zur %-Zahl,
   // "replace" = Balken statt %-Zahl
   progressBarMode: "off",
-  thresholdOrange: 70, // ab hier orange (%)
-  thresholdRed: 90, // ab hier rot (%)
+  thresholdOrange: 70, // 5h-/7d-Balken: ab hier orange (%)
+  thresholdRed: 90, // 5h-/7d-Balken: ab hier rot (%)
+  // Ctx-Balken: eigene, unabhängige Farbbasis – entweder wie 5h/7d anhand
+  // eines %-Werts, oder anhand der absoluten Tokenzahl (funktioniert auch im
+  // "live, vorläufig"-Fallback, wo noch gar kein % bekannt ist).
+  ctxColorMode: "percent", // "percent" | "tokens"
+  ctxThresholdOrangePct: 70,
+  ctxThresholdRedPct: 90,
+  ctxThresholdOrangeTokens: 120000,
+  ctxThresholdRedTokens: 170000,
   useLiveRateLimitApi: false, // inoffizieller Endpunkt, siehe oben – standardmäßig aus
   // Aktivitätsgetrieben statt Dauerpolling (siehe noteActivity):
   // liveApiRefreshSeconds gilt nur, SOLANGE gerade Traffic läuft.
@@ -61,6 +69,23 @@ const LIVE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const NAV_CONTENT_SELECTOR = ".claudian-input-nav-content";
 const TAB_BAR_SELECTOR = ".claudian-tab-bar-container";
 const WEEKDAYS_DE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
+
+// Erlaubt bei Token-Schwellwert-Eingaben neben exakten Zahlen ("120000")
+// auch Kurzschreibweisen ("120k"/"120K", "1M", "0,14M"/"0.14M" – sowohl mit
+// Komma als auch Punkt als Dezimaltrennzeichen). Gibt bei ungültiger Eingabe
+// null zurück (Aufrufer fällt dann auf den bisherigen/Standard-Wert zurück).
+function parseTokenAmount(input) {
+  if (input == null) return null;
+  const s = String(input).trim().replace(",", ".");
+  const match = s.match(/^(\d+(?:\.\d+)?)\s*([kKmM]?)$/);
+  if (!match) return null;
+  const num = Number(match[1]);
+  if (!Number.isFinite(num)) return null;
+  const suffix = match[2].toLowerCase();
+  const multiplier = suffix === "k" ? 1_000 : suffix === "m" ? 1_000_000 : 1;
+  const result = Math.round(num * multiplier);
+  return result >= 0 ? result : null;
+}
 
 module.exports = class ClaudianStatuslinePlugin extends Plugin {
   async onload() {
@@ -545,7 +570,10 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
   // ---------- Fortschrittsbalken mit Grün/Orange/Rot-Eskalation ----------
 
-  createBarEl(pctNum) {
+  // `color` optional: wird er übergeben, überschreibt er die per pctNum aus
+  // den 5h-/7d-Schwellwerten ermittelte Farbe (genutzt vom Ctx-Balken, der
+  // seine eigene, unabhängige Farblogik hat, siehe colorForCtx).
+  createBarEl(pctNum, color) {
     const bar = document.createElement("span");
     bar.className = "claudian-statusline-bar";
 
@@ -553,18 +581,49 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     fill.className = "claudian-statusline-bar-fill";
     const clamped = pctNum == null ? 0 : Math.max(0, Math.min(100, pctNum));
     fill.style.width = `${clamped}%`;
-    fill.style.backgroundColor = this.colorForPct(pctNum);
+    fill.style.backgroundColor = color != null ? color : this.colorForPct(pctNum);
     bar.appendChild(fill);
 
     return bar;
   }
 
+  // Farblogik für die 5h-/7d-Balken (immer prozentbasiert).
   colorForPct(pctNum) {
     if (pctNum == null) return "var(--background-modifier-border)";
     const { thresholdOrange, thresholdRed } = this.settings;
     if (pctNum >= thresholdRed) return "var(--color-red)";
     if (pctNum >= thresholdOrange) return "var(--color-orange)";
     return "var(--color-green)";
+  }
+
+  // Farblogik für den Ctx-Balken – eigene Schwellwerte, wahlweise auf Basis
+  // des %-Werts (wie 5h/7d) oder der absoluten Tokenzahl. Letzteres ist der
+  // einzige Weg, den Balken auch im "live, vorläufig"-Fallback einzufärben,
+  // da dort (noch) kein %-Wert bekannt ist (Kontextfenster erst nach
+  // Turn-Abschluss von Claudian bekannt).
+  colorForCtx(pctNum, tokens) {
+    if (this.settings.ctxColorMode === "tokens") {
+      if (tokens == null || !Number.isFinite(tokens)) return "var(--background-modifier-border)";
+      const { ctxThresholdOrangeTokens, ctxThresholdRedTokens } = this.settings;
+      if (tokens >= ctxThresholdRedTokens) return "var(--color-red)";
+      if (tokens >= ctxThresholdOrangeTokens) return "var(--color-orange)";
+      return "var(--color-green)";
+    }
+    if (pctNum == null) return "var(--background-modifier-border)";
+    const { ctxThresholdOrangePct, ctxThresholdRedPct } = this.settings;
+    if (pctNum >= ctxThresholdRedPct) return "var(--color-red)";
+    if (pctNum >= ctxThresholdOrangePct) return "var(--color-orange)";
+    return "var(--color-green)";
+  }
+
+  // Balkenlänge bei Farbbasis "Tokenzahl": der Rot-Schwellwert wird als
+  // "100 % Balkenlänge" normiert (statt des tatsächlichen, meist deutlich
+  // größeren Kontextfensters) – so füllt sich der Balken sichtbar in Richtung
+  // des selbst gesetzten Warnbereichs, nicht erst nahe der echten 200k-Grenze.
+  ctxTokenBarWidthPct(tokens) {
+    const redThreshold = this.settings.ctxThresholdRedTokens;
+    if (!(redThreshold > 0) || tokens == null || !Number.isFinite(tokens)) return 0;
+    return Math.min(100, (tokens / redThreshold) * 100);
   }
 
   formatResetTime(resetsAt) {
@@ -636,6 +695,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       return {
         ok: true,
         isLive: true,
+        ctxTokensNum: liveTokens,
         ctxTokensStr: this.formatTokens(liveTokens),
         inStr: this.formatTokens(liveTokens),
         outStr: typeof liveUsage.output_tokens === "number" ? this.formatTokens(liveUsage.output_tokens) : "–",
@@ -656,6 +716,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       isLive: false,
       pctNum: Number.isFinite(pctNum) ? pctNum : null,
       pctStr: pctNum != null ? `${Math.round(pctNum)}%` : "–",
+      ctxTokensNum: typeof ctxTokens === "number" && Number.isFinite(ctxTokens) ? ctxTokens : null,
       ctxStr:
         ctxTokens != null && ctxWindow ? `${this.formatTokens(ctxTokens)}/${this.formatTokens(ctxWindow)}` : "–",
       inStr: this.formatTokens(inTokens),
@@ -674,20 +735,35 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
     const frag = document.createDocumentFragment();
 
+    const mode = this.settings.progressBarMode;
+
     if (data.isLive) {
       // Vorläufige, live aus dem JSONL-Transkript berechnete Werte (siehe
       // getContextData) – noch keine %-Angabe möglich, da Claudian das
       // Kontextfenster/die %-Berechnung erst nach Turn-Abschluss liefert.
-      frag.appendChild(
-        document.createTextNode(
-          `Ctx: ~${data.ctxTokensStr} (live, vorläufig) · In: ${data.inStr} · Out: ${data.outStr}`
-        )
-      );
+      // Ein Balken lässt sich hier trotzdem zeigen, sofern die Ctx-Farbbasis
+      // auf "Tokenzahl" steht (siehe ctxTokenBarWidthPct) – bei Farbbasis
+      // "Prozent" bleibt der Balken hier weiterhin aus, da dafür schlicht
+      // kein %-Wert existiert.
+      frag.appendChild(document.createTextNode(`Ctx: ~${data.ctxTokensStr} (live, vorläufig) `));
+      if (mode !== "off" && this.settings.ctxColorMode === "tokens") {
+        const widthPct = this.ctxTokenBarWidthPct(data.ctxTokensNum);
+        const color = this.colorForCtx(null, data.ctxTokensNum);
+        frag.appendChild(this.createBarEl(widthPct, color));
+        frag.appendChild(document.createTextNode(" "));
+      }
+      frag.appendChild(document.createTextNode(`· In: ${data.inStr} · Out: ${data.outStr}`));
     } else {
-      const mode = this.settings.progressBarMode;
+      const color = this.colorForCtx(data.pctNum, data.ctxTokensNum);
+      // Balkenlänge (nicht nur Farbe!) richtet sich bei Farbbasis "Tokenzahl"
+      // ebenfalls nach dem Rot-Schwellwert statt nach dem echten, von
+      // Claudian gemeldeten %-Wert – der Rot-Schwellwert entspricht dann
+      // also "100 % Balkenlänge", unabhängig vom tatsächlichen Kontextfenster.
+      const barWidthPct =
+        this.settings.ctxColorMode === "tokens" ? this.ctxTokenBarWidthPct(data.ctxTokensNum) : data.pctNum;
       frag.appendChild(document.createTextNode("Ctx: "));
       if (mode !== "replace") frag.appendChild(document.createTextNode(`${data.pctStr} `));
-      if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(data.pctNum));
+      if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(barWidthPct, color));
       frag.appendChild(
         document.createTextNode(` (${data.ctxStr}) · In: ${data.inStr} · Out: ${data.outStr}`)
       );
@@ -935,7 +1011,8 @@ class ClaudianStatuslineSettingTab extends PluginSettingTab {
       .setName("Fortschrittsbalken für %-Werte")
       .setDesc(
         "Zusätzlich oder anstelle der %-Zahl je einen kleinen, farbigen Balken " +
-          "anzeigen (5h, 7d, Ctx). Farbe wechselt automatisch Grün → Orange → Rot."
+          "anzeigen (5h, 7d, Ctx). Farbe wechselt automatisch Grün → Orange → Rot. " +
+          "Die Farbschwellwerte für den Ctx-Balken lassen sich unten separat einstellen."
       )
       .addDropdown((d) =>
         d
@@ -951,8 +1028,8 @@ class ClaudianStatuslineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Schwellwert Orange (%)")
-      .setDesc("Ab diesem Prozentwert färbt sich der Balken orange.")
+      .setName("Schwellwert Orange (%) – 5h/7d")
+      .setDesc("Gilt nur für die 5h-/7d-Rate-Limit-Balken. Ab diesem Prozentwert färbt sich der Balken orange.")
       .addText((t) =>
         t.setValue(String(this.plugin.settings.thresholdOrange)).onChange(async (v) => {
           const n = parseInt(v, 10);
@@ -964,13 +1041,106 @@ class ClaudianStatuslineSettingTab extends PluginSettingTab {
       );
 
     new Setting(containerEl)
-      .setName("Schwellwert Rot (%)")
-      .setDesc("Ab diesem Prozentwert färbt sich der Balken rot.")
+      .setName("Schwellwert Rot (%) – 5h/7d")
+      .setDesc("Gilt nur für die 5h-/7d-Rate-Limit-Balken. Ab diesem Prozentwert färbt sich der Balken rot.")
       .addText((t) =>
         t.setValue(String(this.plugin.settings.thresholdRed)).onChange(async (v) => {
           const n = parseInt(v, 10);
           this.plugin.settings.thresholdRed =
             Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_SETTINGS.thresholdRed;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    containerEl.createEl("h3", { text: "Ctx-Balken: eigene Farbeinstellung" });
+    containerEl.createEl("p", {
+      cls: "setting-item-description",
+      text:
+        "Der Ctx-Balken hat eine eigene, vom 5h-/7d-Balken unabhängige " +
+        "Farblogik – wahlweise anhand des %-Werts oder anhand der absoluten " +
+        "Tokenzahl. Tokenbasiert ist besonders im \"live, vorläufig\"-Zustand " +
+        "sinnvoll (frischer Tab oder Antwort läuft noch): Dort ist noch kein " +
+        "%-Wert bekannt (Claudian liefert das Kontextfenster erst nach " +
+        "Turn-Abschluss) – nur mit Tokenbasis wird der Balken auch dann " +
+        "eingefärbt und angezeigt.",
+    });
+
+    new Setting(containerEl)
+      .setName("Farbbasis für Ctx-Balken")
+      .setDesc(
+        "\"Prozent\" verhält sich wie beim 5h-/7d-Balken. \"Tokenzahl\" färbt " +
+          "anhand der absoluten Anzahl verbrauchter Kontext-Tokens – dein " +
+          "Kontextfenster ist meist konstant (z. B. 200k), daher lassen sich " +
+          "die Schwellwerte unten einmalig darauf abstimmen."
+      )
+      .addDropdown((d) =>
+        d
+          .addOption("percent", "Prozent (wie 5h/7d)")
+          .addOption("tokens", "Tokenzahl (absolut)")
+          .setValue(this.plugin.settings.ctxColorMode)
+          .onChange(async (v) => {
+            this.plugin.settings.ctxColorMode = v;
+            await this.plugin.saveSettings();
+            this.plugin.refreshAll();
+          })
+      );
+
+    new Setting(containerEl)
+      .setName("Ctx-Schwellwert Orange (%)")
+      .setDesc("Nur bei Farbbasis \"Prozent\" relevant.")
+      .addText((t) =>
+        t.setValue(String(this.plugin.settings.ctxThresholdOrangePct)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          this.plugin.settings.ctxThresholdOrangePct =
+            Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_SETTINGS.ctxThresholdOrangePct;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Ctx-Schwellwert Rot (%)")
+      .setDesc("Nur bei Farbbasis \"Prozent\" relevant.")
+      .addText((t) =>
+        t.setValue(String(this.plugin.settings.ctxThresholdRedPct)).onChange(async (v) => {
+          const n = parseInt(v, 10);
+          this.plugin.settings.ctxThresholdRedPct =
+            Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_SETTINGS.ctxThresholdRedPct;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Ctx-Schwellwert Orange (Tokens)")
+      .setDesc(
+        "Nur bei Farbbasis \"Tokenzahl\" relevant. Absolute Anzahl Kontext-" +
+          "Tokens, ab der orange gefärbt wird. Kurzschreibweisen erlaubt, " +
+          "z. B. \"120k\", \"1M\" oder \"0,14M\"."
+      )
+      .addText((t) =>
+        t.setValue(String(this.plugin.settings.ctxThresholdOrangeTokens)).onChange(async (v) => {
+          const n = parseTokenAmount(v);
+          this.plugin.settings.ctxThresholdOrangeTokens =
+            n != null ? n : DEFAULT_SETTINGS.ctxThresholdOrangeTokens;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Ctx-Schwellwert Rot (Tokens)")
+      .setDesc(
+        "Nur bei Farbbasis \"Tokenzahl\" relevant. Absolute Anzahl Kontext-" +
+          "Tokens, ab der rot gefärbt wird. Kurzschreibweisen erlaubt, " +
+          "z. B. \"170k\", \"1M\" oder \"0,17M\"."
+      )
+      .addText((t) =>
+        t.setValue(String(this.plugin.settings.ctxThresholdRedTokens)).onChange(async (v) => {
+          const n = parseTokenAmount(v);
+          this.plugin.settings.ctxThresholdRedTokens =
+            n != null ? n : DEFAULT_SETTINGS.ctxThresholdRedTokens;
           await this.plugin.saveSettings();
           this.plugin.refreshAll();
         })

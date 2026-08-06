@@ -150,8 +150,25 @@ es ist eine reine Abfrage, keine Generation.
 - **Schriftgröße** (9–20 px, Standard: 11 px) – wirkt auf beide Zeilen
 - **Fortschrittsbalken für %-Werte** (5h, 7d, Ctx): "Aus" (nur Text, Standard),
   "Zusätzlich zur %-Zahl" oder "Statt %-Zahl". Balkenfarbe wechselt
-  automatisch Grün → Orange → Rot anhand zweier konfigurierbarer
-  Schwellwerte (Standard: 70 % / 90 %)
+  automatisch Grün → Orange → Rot.
+  - 5h/7d nutzen zwei gemeinsame, konfigurierbare %-Schwellwerte (Standard:
+    70 % / 90 %).
+  - **Ctx hat eine eigene, unabhängige Farbeinstellung**: wahlweise
+    "Prozent" (eigene %-Schwellwerte, analog zu 5h/7d) oder "Tokenzahl"
+    (Schwellwerte als absolute Anzahl Kontext-Tokens, Standard: 120.000 /
+    170.000 – Eingabe auch als Kurzschreibweise möglich, z. B. `120k`, `1M`
+    oder `0,17M`, mit Komma oder Punkt als Dezimaltrennzeichen). Tokenbasiert
+    ist besonders im **"live, vorläufig"-Fallback**
+    nützlich: Dort ist noch kein %-Wert bekannt (Claudian liefert das
+    Kontextfenster erst nach Turn-Abschluss), sodass sich der Balken nur mit
+    Tokenbasis überhaupt einfärben und anzeigen lässt – bei Farbbasis
+    "Prozent" bleibt er in diesem Zustand weiterhin aus. Bei Farbbasis
+    "Tokenzahl" wird zudem die **Balkenlänge selbst** auf den Rot-Schwellwert
+    normiert (der Rot-Schwellwert entspricht also "100 % Balkenlänge"), statt
+    auf das tatsächliche, meist deutlich größere Kontextfenster – so wird der
+    selbst gesetzte Warnbereich auch optisch sichtbar ausgefüllt, statt dass
+    der Balken erst nahe der echten ~200k-Grenze voll wirkt. Gilt sowohl im
+    normalen als auch im "live, vorläufig"-Zustand.
 - Claude-Verzeichnis überschreibbar (bei `CLAUDE_CONFIG_DIR`/portabler
   Installation abweichend von `~/.claude`)
 - **Debug-Logging** (Konsole): schreibt Aktualisierungszyklen, gelesene Werte

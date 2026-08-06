@@ -147,8 +147,22 @@ a plain query, not a generation.
 - **Font size** (9–20 px, default: 11 px) – applies to both lines
 - **Progress bars for % values** (5h, 7d, Ctx): "Off" (text only, default),
   "In addition to the % number", or "Instead of the % number". Bar color
-  automatically escalates green → orange → red based on two configurable
-  thresholds (default: 70% / 90%)
+  automatically escalates green → orange → red.
+  - 5h/7d use two shared, configurable % thresholds (default: 70% / 90%).
+  - **Ctx has its own, independent color setting**: either "Percent" (own %
+    thresholds, mirroring 5h/7d) or "Token count" (thresholds as an absolute
+    number of context tokens, default: 120,000 / 170,000 – shorthand input
+    also accepted, e.g. `120k`, `1M`, or `0.14M`, with either a comma or a
+    period as the decimal separator). Token-based is especially useful in the
+    **"live, preliminary" fallback**: no % value is known there yet (Claudian
+    only reports the context window after a turn finishes), so token-based is
+    the only way to color and show the bar at all in that state – with
+    "Percent" it simply stays off there. With "Token count", the **bar length
+    itself** is also normalized to the red threshold (red = 100% bar length)
+    instead of to the actual, usually much larger context window – so your
+    self-chosen warning zone is visibly filled in, rather than the bar only
+    looking full near the real ~200k limit. Applies both in the normal and in
+    the "live, preliminary" state.
 - Claude directory overridable (for `CLAUDE_CONFIG_DIR`/portable
   installations that differ from `~/.claude`)
 - **Debug logging** (console): writes refresh cycles, values read, and raw
