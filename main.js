@@ -56,6 +56,13 @@ const DEFAULT_SETTINGS = {
   ctxThresholdRedPct: 90,
   ctxThresholdOrangeTokens: 120000,
   ctxThresholdRedTokens: 170000,
+  // Nur bei ctxColorMode "tokens" relevant: statt des von Claudian
+  // gemeldeten echten %-Werts (bezogen aufs tatsächliche Kontextfenster) die
+  // angezeigte %-Zahl auf den eigenen Rot-Schwellwert normieren (100 % =
+  // eigener Warnwert) – kann dann bewusst über 100 % steigen, siehe
+  // ctxCustomPercent(). Opt-in, damit sich für Bestandsnutzer nichts
+  // stillschweigend ändert.
+  ctxNormalizePercent: false,
   useLiveRateLimitApi: false, // inoffizieller Endpunkt, siehe oben – standardmäßig aus
   // Aktivitätsgetrieben statt Dauerpolling (siehe noteActivity):
   // liveApiRefreshSeconds gilt nur, SOLANGE gerade Traffic läuft.
@@ -626,6 +633,18 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     return Math.min(100, (tokens / redThreshold) * 100);
   }
 
+  // Gegenstück zu ctxTokenBarWidthPct() für die %-ZAHL statt der Balkenlänge:
+  // bewusst NICHT auf 100 gedeckelt (ein Balken kann nicht über den Rand
+  // hinaus zeichnen, eine Zahl schon) – wer den eigenen Rot-Schwellwert als
+  // "100 %"-Grenze versteht, sieht so auf einen Blick, um wie viel Prozent
+  // er diese selbst gesetzte, sichere Grenze bereits überschritten hat (z. B.
+  // 118 %), statt dass die Anzeige bei 100 % einfach "steckenbleibt".
+  ctxCustomPercent(tokens) {
+    const redThreshold = this.settings.ctxThresholdRedTokens;
+    if (!(redThreshold > 0) || tokens == null || !Number.isFinite(tokens)) return null;
+    return (tokens / redThreshold) * 100;
+  }
+
   formatResetTime(resetsAt) {
     if (resetsAt == null || resetsAt === "") return "–";
     // Die Datei-basierte Quelle liefert Epoch-Sekunden als String/Zahl, die
@@ -759,6 +778,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
   renderContextRow(row2) {
     row2.textContent = "";
+    row2.title = "";
     const data = this.getContextData();
     this.log("renderContextRow():", new Date().toLocaleTimeString(), data);
     if (!data.ok) {
@@ -769,16 +789,23 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     const frag = document.createDocumentFragment();
 
     const mode = this.settings.progressBarMode;
+    // Nur bei Farbbasis "Tokenzahl" sinnvoll: die angezeigte %-Zahl auf den
+    // eigenen Rot-Schwellwert normieren (100 % = eigener Warnwert) statt den
+    // echten, von Claudian gemeldeten %-Wert zu zeigen – siehe
+    // ctxCustomPercent(). Kann bewusst über 100 % steigen.
+    const useCustomPercent = this.settings.ctxColorMode === "tokens" && this.settings.ctxNormalizePercent;
 
     if (data.isLive) {
       // Vorläufige, live aus dem JSONL-Transkript berechnete Werte (siehe
-      // getContextData) – noch keine %-Angabe möglich, da Claudian das
-      // Kontextfenster/die %-Berechnung erst nach Turn-Abschluss liefert.
-      // Ein Balken lässt sich hier trotzdem zeigen, sofern die Ctx-Farbbasis
-      // auf "Tokenzahl" steht (siehe ctxTokenBarWidthPct) – bei Farbbasis
-      // "Prozent" bleibt der Balken hier weiterhin aus, da dafür schlicht
-      // kein %-Wert existiert.
-      frag.appendChild(document.createTextNode(`Ctx: ~${data.ctxTokensStr} (live, vorläufig) `));
+      // getContextData) – ohne eigene Normierung noch keine %-Angabe möglich,
+      // da Claudian das Kontextfenster/die %-Berechnung erst nach
+      // Turn-Abschluss liefert. Ein Balken lässt sich hier trotzdem zeigen,
+      // sofern die Ctx-Farbbasis auf "Tokenzahl" steht (siehe
+      // ctxTokenBarWidthPct) – bei Farbbasis "Prozent" bleibt der Balken hier
+      // weiterhin aus, da dafür schlicht kein %-Wert existiert.
+      const customPctNum = useCustomPercent ? this.ctxCustomPercent(data.ctxTokensNum) : null;
+      const customPctSuffix = customPctNum != null ? ` (${Math.round(customPctNum)}%)` : "";
+      frag.appendChild(document.createTextNode(`Ctx: ~${data.ctxTokensStr}${customPctSuffix} (live, vorläufig) `));
       if (mode !== "off" && this.settings.ctxColorMode === "tokens") {
         const widthPct = this.ctxTokenBarWidthPct(data.ctxTokensNum);
         const color = this.colorForCtx(null, data.ctxTokensNum);
@@ -786,6 +813,11 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
         frag.appendChild(document.createTextNode(" "));
       }
       frag.appendChild(document.createTextNode(`· In: ${data.inStr} · Out: ${data.outStr}`));
+      if (customPctNum != null) {
+        row2.title = `Auf eigenen Rot-Schwellwert normierter Wert (100 % = ${this.formatTokens(
+          this.settings.ctxThresholdRedTokens
+        )}). Echter %-Wert lt. Claudian liegt hier noch nicht vor (Antwort läuft noch).`;
+      }
     } else {
       const color = this.colorForCtx(data.pctNum, data.ctxTokensNum);
       // Balkenlänge (nicht nur Farbe!) richtet sich bei Farbbasis "Tokenzahl"
@@ -794,12 +826,23 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       // also "100 % Balkenlänge", unabhängig vom tatsächlichen Kontextfenster.
       const barWidthPct =
         this.settings.ctxColorMode === "tokens" ? this.ctxTokenBarWidthPct(data.ctxTokensNum) : data.pctNum;
+      // Anders als die Balkenlänge wird die %-ZAHL hier bewusst NICHT auf 100
+      // gedeckelt (siehe ctxCustomPercent) – so ist sichtbar, um wie viel man
+      // den eigenen Warnwert bereits überschritten hat, statt dass die
+      // Anzeige bei 100 % steckenbleibt.
+      const customPctNum = useCustomPercent ? this.ctxCustomPercent(data.ctxTokensNum) : null;
+      const displayPctStr = customPctNum != null ? `${Math.round(customPctNum)}%` : data.pctStr;
       frag.appendChild(document.createTextNode("Ctx: "));
-      if (mode !== "replace") frag.appendChild(document.createTextNode(`${data.pctStr} `));
+      if (mode !== "replace") frag.appendChild(document.createTextNode(`${displayPctStr} `));
       if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(barWidthPct, color));
       frag.appendChild(
         document.createTextNode(` (${data.ctxStr}) · In: ${data.inStr} · Out: ${data.outStr}`)
       );
+      if (customPctNum != null) {
+        row2.title = `Auf eigenen Rot-Schwellwert normiert (100 % = ${this.formatTokens(
+          this.settings.ctxThresholdRedTokens
+        )}). Echter %-Wert lt. Claudian: ${data.pctStr}.`;
+      }
     }
 
     row2.appendChild(frag);
@@ -1181,6 +1224,28 @@ class ClaudianStatuslineSettingTab extends PluginSettingTab {
           const n = parseTokenAmount(v);
           this.plugin.settings.ctxThresholdRedTokens =
             n != null ? n : DEFAULT_SETTINGS.ctxThresholdRedTokens;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Ctx-%-Anzeige auf eigenen Rot-Schwellwert normieren")
+      .setDesc(
+        "Nur bei Farbbasis \"Tokenzahl\" relevant. Statt des von Claudian " +
+          "gemeldeten echten %-Werts (bezogen auf das tatsächliche, meist " +
+          "deutlich größere Kontextfenster) wird die angezeigte %-Zahl auf " +
+          "deinen eigenen Rot-Schwellwert oben normiert – dieser Wert gilt " +
+          "dann als \"100 %\". Anders als die Balkenlänge wird diese Zahl " +
+          "dabei NICHT gedeckelt: Überschreitest du deinen selbst gesetzten " +
+          "Schwellwert, steigt die Anzeige bewusst über 100 % (z. B. 118 %), " +
+          "damit sofort sichtbar ist, um wie viel du deinen eigenen, sicher " +
+          "geglaubten Rahmen bereits überschritten hast. Der echte %-Wert " +
+          "steht weiterhin als Tooltip zur Verfügung."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.ctxNormalizePercent).onChange(async (v) => {
+          this.plugin.settings.ctxNormalizePercent = v;
           await this.plugin.saveSettings();
           this.plugin.refreshAll();
         })

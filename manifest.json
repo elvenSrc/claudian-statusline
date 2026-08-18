@@ -1,7 +1,7 @@
 {
   "id": "claudian-statusline",
   "name": "Claudian Statusline",
-  "version": "1.7.2",
+  "version": "1.8.0",
   "minAppVersion": "1.7.2",
   "description": "Sidecar-Statusline für Claudian (von Yishen Tu): 5h-/7d-Rate-Limit (Tab-unabhängig) plus Kontext-%/Token pro Tab, oberhalb des Eingabefelds. Verändert Claudian selbst nicht und lässt sich jederzeit folgenlos deaktivieren.",
   "author": "elvenSrc",

@@ -173,6 +173,16 @@ a plain query, not a generation.
     self-chosen warning zone is visibly filled in, rather than the bar only
     looking full near the real ~200k limit. Applies both in the normal and in
     the "live, preliminary" state.
+  - Also token-count-only: **"Normalize Ctx % display to your own red
+    threshold"** (default: off). Extends the bar-length normalization above
+    to the displayed **% number** itself – 100% means your own red
+    threshold, not the real context window. Unlike the bar length, this
+    number is deliberately **not capped at 100%**: once you exceed your own
+    threshold, the display keeps climbing past it (e.g. 118%), so it's
+    immediately visible by how much you've overrun your own, presumably
+    safe, boundary. The real, Claudian-reported % value stays available as a
+    tooltip on the line. Applies both in the normal and in the "live,
+    preliminary" state.
 - Claude directory overridable (for `CLAUDE_CONFIG_DIR`/portable
   installations that differ from `~/.claude`)
 - **Debug logging** (console): writes refresh cycles, values read, and raw

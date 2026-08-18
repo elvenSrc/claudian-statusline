@@ -179,6 +179,15 @@ es ist eine reine Abfrage, keine Generation.
     selbst gesetzte Warnbereich auch optisch sichtbar ausgefüllt, statt dass
     der Balken erst nahe der echten ~200k-Grenze voll wirkt. Gilt sowohl im
     normalen als auch im "live, vorläufig"-Zustand.
+  - Zusätzlich, ebenfalls nur bei Farbbasis "Tokenzahl": **"Ctx-%-Anzeige auf
+    eigenen Rot-Schwellwert normieren"** (Standard: aus). Damit wird nicht
+    nur die Balken*länge*, sondern auch die angezeigte %-*Zahl* auf den
+    eigenen Rot-Schwellwert bezogen (100 % = eigener Warnwert) – anders als
+    die Balkenlänge aber bewusst **ohne Deckelung bei 100 %**: Wird der
+    eigene Schwellwert überschritten, steigt die Anzeige entsprechend darüber
+    (z. B. 118 %), sodass sofort sichtbar ist, um wie viel der selbst
+    gesetzte, sicher geglaubte Rahmen bereits überschritten wurde. Der echte,
+    von Claudian gemeldete %-Wert bleibt per Tooltip auf der Zeile abrufbar.
 - Claude-Verzeichnis überschreibbar (bei `CLAUDE_CONFIG_DIR`/portabler
   Installation abweichend von `~/.claude`)
 - **Debug-Logging** (Konsole): schreibt Aktualisierungszyklen, gelesene Werte
