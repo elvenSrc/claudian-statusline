@@ -88,6 +88,16 @@ vollständige Ansicht mit %-Wert um. Nur bei einem wirklich leeren Tab ganz
 ohne jede Aktivität bleibt "Ctx: – (noch keine Nutzungsdaten für diesen Tab)"
 stehen.
 
+Dieser Live-Fallback greift dabei nicht nur beim allerersten Turn eines
+frischen Tabs, sondern auch bei **jedem weiteren** Turn (und direkt nach
+einem `/compact`): Erkannt wird das über einen Zeitstempel-Vergleich – ist
+das JSONL-Transkript neuer als die zuletzt geschriebene `*.meta.json`, gilt
+deren `usage`-Feld als veraltet, und Zeile 2 rechnet so lange live nach, bis
+Claudian nach Abschluss des aktuellen Turns eine neue `usage` schreibt. Ohne
+diese Erkennung würde Zeile 2 ab dem zweiten Turn in einem Tab bis zum
+jeweiligen Abschluss stur die (unter Umständen längst überholten) Werte des
+vorigen Turns zeigen.
+
 ## Live-Rate-Limit-Abfrage (experimentell, standardmäßig aus)
 
 Normalerweise stammt Zeile 1 aus `~/.claude/statusline-cache.json` – diese

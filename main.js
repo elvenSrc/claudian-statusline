@@ -679,27 +679,61 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     // Claudian selbst schreibt das "usage"-Feld in meta.json erst NACH
     // vollständigem Abschluss einer Antwort (empirisch bestätigt: bei einem
     // frisch gestarteten Chat blieb es mehrere Minuten leer, obwohl bereits
-    // aktiv generiert wurde). Solange es fehlt (frischer Tab oder Antwort
-    // läuft noch), live aus dem JSONL-Transkript der Session nachrechnen –
-    // dieselbe Quelle, aus der auch das portable statusline-viewer-py-Tool
-    // liest und die währenddessen bereits aktuell ist.
-    if (!meta.usage) {
-      const liveUsage = this.readLastAssistantUsage(meta.sessionId);
-      if (!liveUsage) {
+    // aktiv generiert wurde). Solange es fehlt (frischer Tab) ODER solange es
+    // schlicht VERALTET ist (nächster Turn läuft bereits, oder gerade eben
+    // ein "/compact" passiert ist), live aus dem JSONL-Transkript der Session
+    // nachrechnen – dieselbe Quelle, aus der auch das portable
+    // statusline-viewer-py-Tool liest und die während der Generierung/direkt
+    // nach einem Compact bereits aktuell ist.
+    //
+    // "Veraltet" wird über den Datei-Zeitstempel erkannt, nicht über die
+    // Tokenzahl: Ein Compact kann den Tokenverbrauch auch SENKEN statt
+    // erhöhen, ein reiner Zahlenvergleich (größer/kleiner) würde das also
+    // verpassen. Der Zeitstempel-Vergleich ist dabei robust gegen
+    // Schreibreihenfolge-Zufälle, weil Claudian "meta.json" immer erst
+    // schreiben KANN, nachdem die zugehörige Transkript-Zeile schon
+    // existiert (es liest die Usage-Daten ja erst aus der Antwort, die zuvor
+    // schon im JSONL gelandet ist) – ist das JSONL trotzdem neuer als
+    // meta.json, ist seit dem letzten meta.json-Schreiben mindestens eine
+    // neue Nachricht dazugekommen.
+    const liveUsage = this.readLastAssistantUsage(meta.sessionId);
+    const liveTokens = liveUsage
+      ? (liveUsage.input_tokens || 0) +
+        (liveUsage.cache_creation_input_tokens || 0) +
+        (liveUsage.cache_read_input_tokens || 0)
+      : null;
+
+    let metaUsageStale = false;
+    if (meta.usage) {
+      try {
+        const jsonlFile = this.getSessionJsonlPath(meta.sessionId);
+        if (jsonlFile && fs.existsSync(jsonlFile)) {
+          const metaMtimeMs = fs.statSync(metaFile).mtimeMs;
+          const jsonlMtimeMs = fs.statSync(jsonlFile).mtimeMs;
+          if (jsonlMtimeMs > metaMtimeMs) metaUsageStale = true;
+        }
+      } catch (e) {
+        // Bei Stat-Fehlern konservativ dem bisherigen meta.usage vertrauen.
+      }
+    }
+
+    if (!meta.usage || metaUsageStale) {
+      if (liveUsage) {
+        return {
+          ok: true,
+          isLive: true,
+          ctxTokensNum: liveTokens,
+          ctxTokensStr: this.formatTokens(liveTokens),
+          inStr: this.formatTokens(liveTokens),
+          outStr: typeof liveUsage.output_tokens === "number" ? this.formatTokens(liveUsage.output_tokens) : "–",
+        };
+      }
+      if (!meta.usage) {
         return { ok: false, message: "Ctx: – (noch keine Nutzungsdaten für diesen Tab)" };
       }
-      const liveTokens =
-        (liveUsage.input_tokens || 0) +
-        (liveUsage.cache_creation_input_tokens || 0) +
-        (liveUsage.cache_read_input_tokens || 0);
-      return {
-        ok: true,
-        isLive: true,
-        ctxTokensNum: liveTokens,
-        ctxTokensStr: this.formatTokens(liveTokens),
-        inStr: this.formatTokens(liveTokens),
-        outStr: typeof liveUsage.output_tokens === "number" ? this.formatTokens(liveUsage.output_tokens) : "–",
-      };
+      // liveUsage nicht lesbar (z. B. Transkript-Datei kurzzeitig nicht
+      // auffindbar) – dann lieber die zwar potenziell veralteten, aber
+      // vorhandenen meta.usage-Werte zeigen als "–" (fällt unten durch).
     }
 
     const usage = meta.usage;
@@ -708,7 +742,6 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     const ctxWindow = usage.contextWindow;
     const inTokens =
       (usage.inputTokens || 0) + (usage.cacheCreationInputTokens || 0) + (usage.cacheReadInputTokens || 0);
-    const liveUsage = this.readLastAssistantUsage(meta.sessionId);
     const outTokens = liveUsage && typeof liveUsage.output_tokens === "number" ? liveUsage.output_tokens : null;
 
     return {
@@ -831,20 +864,27 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     return found;
   }
 
+  // Pfad zum JSONL-Transkript einer Session (siehe resolveProjectDir) – von
+  // readLastAssistantUsage() UND dem Veraltet-Check in getContextData()
+  // genutzt, daher als eigener Helper statt dupliziert.
+  getSessionJsonlPath(sessionId) {
+    if (!sessionId) return null;
+    const vaultBase = this.getVaultBasePath();
+    if (!vaultBase) return null;
+    const projectDir = this.resolveProjectDir(this.getClaudeDir(), vaultBase);
+    return path.join(projectDir, `${sessionId}.jsonl`);
+  }
+
   // Das komplette "usage"-Objekt (input_tokens, cache_*, output_tokens) der
   // letzten Assistant-Nachricht steht nicht in meta.json, sondern nur im
   // JSONL-Transkript der zugrundeliegenden Claude-Code-Session (gleiche
   // Ablage wie beim CLI, siehe resolveProjectDir).
   // Wird sowohl für Out (immer) als auch als Live-Fallback für Ctx/In
-  // genutzt, solange Claudian selbst noch kein meta.json-"usage" geschrieben
-  // hat (siehe getContextData).
+  // genutzt, solange Claudian selbst noch kein aktuelles meta.json-"usage"
+  // geschrieben hat (siehe getContextData, inkl. Veraltet-Erkennung).
   readLastAssistantUsage(sessionId) {
-    if (!sessionId) return null;
-    const vaultBase = this.getVaultBasePath();
-    if (!vaultBase) return null;
-
-    const projectDir = this.resolveProjectDir(this.getClaudeDir(), vaultBase);
-    const jsonlFile = path.join(projectDir, `${sessionId}.jsonl`);
+    const jsonlFile = this.getSessionJsonlPath(sessionId);
+    if (!jsonlFile) return null;
 
     try {
       if (!fs.existsSync(jsonlFile)) return null;

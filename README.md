@@ -86,6 +86,16 @@ and writes `usage`, the line automatically switches to the full view with a
 % value. Only for a genuinely empty tab with no activity at all does
 "Ctx: – (no usage data yet for this tab)" stay as-is.
 
+This live fallback doesn't only kick in for a tab's very first turn — it
+also applies to **every subsequent turn** (and right after a `/compact`):
+detected via a timestamp comparison between `*.meta.json` and its
+associated JSONL transcript. If the transcript is newer than the last
+`usage` write, line 2 keeps computing live values until Claudian writes a
+fresh `usage` once the current turn completes. Without this check, line 2
+would otherwise get stuck showing the (possibly long outdated) values from
+the previous turn for the entire duration of every turn after the first
+one in a tab.
+
 ## Live rate-limit query (experimental, off by default)
 
 Normally line 1 comes from `~/.claude/statusline-cache.json` – but that
