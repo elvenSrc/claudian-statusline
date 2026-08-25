@@ -75,6 +75,13 @@ const CLAUDIAN_PLUGIN_ID = "realclaudian";
 const LIVE_USAGE_URL = "https://api.anthropic.com/api/oauth/usage";
 const NAV_CONTENT_SELECTOR = ".claudian-input-nav-content";
 const TAB_BAR_SELECTOR = ".claudian-tab-bar-container";
+// Ab Claudian 2.2.x liegt der Tab-Status nicht mehr zentral in der
+// data.json des Plugins ("tabManagerState"), sondern je Leaf/Pane als
+// Obsidian-View-State in workspace.json, unter dem View-Typ "claudian-view"
+// und dort im Feld "tabWorkspace" (siehe findClaudianTabWorkspace()). Beide
+// Anker werden unterstützt (neu zuerst, alt als Fallback), falls Claudian
+// die Migration noch nicht durchgeführt hat oder erneut umbaut.
+const CLAUDIAN_VIEW_TYPE = "claudian-view";
 const WEEKDAYS_DE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
 // Erlaubt bei Token-Schwellwert-Eingaben neben exakten Zahlen ("120000")
@@ -672,15 +679,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     const vaultBase = this.getVaultBasePath();
     if (!vaultBase) return { ok: false, message: "Ctx: – (Vault-Pfad nicht ermittelbar)" };
 
-    const claudianDataFile = path.join(
-      vaultBase,
-      ".obsidian",
-      "plugins",
-      CLAUDIAN_PLUGIN_ID,
-      "data.json"
-    );
-    const claudianData = this.readJsonSafe(claudianDataFile);
-    const tabState = claudianData && claudianData.tabManagerState;
+    const tabState = this.findClaudianTabWorkspace(vaultBase);
     if (!tabState) return { ok: false, message: "Ctx: – (Claudian-Tab-Status nicht gefunden)" };
 
     const activeTabId = tabState.activeTabId;
@@ -983,6 +982,71 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
   }
 
   // ---------- Hilfsfunktionen ----------
+
+  // Liefert { activeTabId, openTabs: [{tabId, conversationId}, ...] } oder
+  // null, egal ob Claudian den Tab-Status (noch) zentral in seiner data.json
+  // ablegt oder (ab 2.2.x) je Leaf/Pane als eigenen View-State in
+  // workspace.json. Reihenfolge: neuer Anker zuerst, alter als Fallback
+  // (z. B. während/vor Claudians eigener Migration).
+  findClaudianTabWorkspace(vaultBase) {
+    const fromWorkspace = this.findTabWorkspaceInWorkspaceLayout(vaultBase);
+    if (fromWorkspace) return fromWorkspace;
+    return this.findLegacyTabManagerState(vaultBase);
+  }
+
+  // Neuer Anker (ab Claudian 2.2.x): workspace.json enthält irgendwo im
+  // Layout-Baum (main-/left-/right-Split, Floating-Windows – Struktur bewusst
+  // NICHT hart verdrahtet, da das Obsidian-interne Schema ist) einen Leaf mit
+  // state.type === "claudian-view"; dessen eigener View-State liegt in
+  // state.state und trägt dort das Feld "tabWorkspace"
+  // ({ version, activeTabId, openTabs: [{tabId, conversationId}] }).
+  findTabWorkspaceInWorkspaceLayout(vaultBase) {
+    const workspaceFile = path.join(vaultBase, ".obsidian", "workspace.json");
+    const workspace = this.readJsonSafe(workspaceFile);
+    if (!workspace) return null;
+
+    const found = this.findFirstClaudianViewState(workspace, 0);
+    return (found && found.tabWorkspace) || null;
+  }
+
+  // Generischer, tiefenbegrenzter Baum-Walk statt hart kodierter
+  // children/root/left/right/floating-Pfade: robuster gegen künftige
+  // Layout-Umbauten, solange der Leaf selbst weiterhin
+  // { type: "claudian-view", state: {...} } trägt.
+  findFirstClaudianViewState(node, depth) {
+    if (depth > 40 || node == null || typeof node !== "object") return null;
+
+    if (
+      Array.isArray(node) === false &&
+      node.type === CLAUDIAN_VIEW_TYPE &&
+      node.state &&
+      typeof node.state === "object"
+    ) {
+      return node.state;
+    }
+
+    const children = Array.isArray(node) ? node : Object.values(node);
+    for (const child of children) {
+      const found = this.findFirstClaudianViewState(child, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  // Alter Anker (vor Claudian 2.2.x bzw. solange Claudians eigene
+  // Migration noch nicht gelaufen ist): zentraler Tab-Status in der
+  // data.json des Plugins selbst, Feld "tabManagerState".
+  findLegacyTabManagerState(vaultBase) {
+    const claudianDataFile = path.join(
+      vaultBase,
+      ".obsidian",
+      "plugins",
+      CLAUDIAN_PLUGIN_ID,
+      "data.json"
+    );
+    const claudianData = this.readJsonSafe(claudianDataFile);
+    return (claudianData && claudianData.tabManagerState) || null;
+  }
 
   getClaudeDir() {
     const override = (this.settings.claudeDir || "").trim();
