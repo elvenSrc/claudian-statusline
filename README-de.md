@@ -2,6 +2,7 @@
 
 *[English version](README.md)*
 
+
 Eigenständiges Obsidian-Sidecar-Plugin, das oberhalb des
 [Claudian](https://github.com/YishenTu/claudian)-Eingabefelds (links von
 "New tab"/"Chat history") eine zweizeilige Statusline einblendet:
@@ -45,7 +46,7 @@ Claudians eigene Dateien geschrieben.
 |---|---|---|
 | 5h/7d | `~/.claude/statusline-cache.json` (Pfad überschreibbar in den Plugin-Einstellungen) | `five_hour.used_percentage`/`resets_at`, `seven_day.used_percentage`/`resets_at` |
 | Aktiver Tab | `<Vault>/.obsidian/plugins/realclaudian/data.json` | `tabManagerState.activeTabId`, `tabManagerState.openTabs[].conversationId` |
-| Kontext-%/In | `<Vault>/.claudian/sessions/<conversationId>.meta.json` | `usage.percentage`, `usage.contextTokens`, `usage.contextWindow`, `usage.inputTokens`/`cacheCreationInputTokens`/`cacheReadInputTokens` |
+| Kontext-%/In | `<Vault>/.claudian/sessions/<conversationId>.meta.json` **oder** (ab Claudian 2.2.5, neue Sessions) `<Vault>/.claudian/sessions/devices/device-<Hash>/<conversationId>.meta.json` | `usage.percentage`, `usage.contextTokens`, `usage.contextWindow`, `usage.inputTokens`/`cacheCreationInputTokens`/`cacheReadInputTokens` |
 | Out | `~/.claude/projects/<sanitizedVaultPath>/<sessionId>.jsonl` (letzte Assistant-Message) | `message.usage.output_tokens` |
 
 `sanitizedVaultPath` entspricht Claude Codes eigenem Schema: der absolute
@@ -209,7 +210,11 @@ es ist eine reine Abfrage, keine Generation.
   oder das Format von `data.json`/`*.meta.json`, bleibt die Statusline
   einfach leer/unsichtbar statt zu crashen – dann hier kurz nachschauen, ob
   sich die Selektoren/Felder geändert haben, und `main.js` entsprechend
-  anpassen.
+  anpassen. Bereits einmal eingetreten und behoben (siehe `findMetaFilePath()`
+  in `main.js`): Ab Claudian 2.2.5 landet die `*.meta.json` neuer Sessions
+  geräte-gebunden unter `.claudian/sessions/devices/device-<Hash>/` statt
+  flach unter `.claudian/sessions/` – seit v1.9.0 werden beide Orte
+  unterstützt (neuer zuerst, alter als Fallback für ältere Sessions).
 - **Windows: ungetestet.** `fs.watch` selbst ist plattformneutral (nutzt
   unter Windows intern `ReadDirectoryChangesW` statt inotify) und sollte
   ohne Anpassung funktionieren. Unsicher ist nur, ob `resolveProjectDir()`

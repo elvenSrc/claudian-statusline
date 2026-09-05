@@ -82,6 +82,10 @@ const TAB_BAR_SELECTOR = ".claudian-tab-bar-container";
 // Anker werden unterstützt (neu zuerst, alt als Fallback), falls Claudian
 // die Migration noch nicht durchgeführt hat oder erneut umbaut.
 const CLAUDIAN_VIEW_TYPE = "claudian-view";
+// Ab Claudian 2.2.5 liegen neue *.meta.json-Dateien nicht mehr flach unter
+// .claudian/sessions/, sondern je Gerät unter
+// .claudian/sessions/devices/device-<Hash>/ (siehe findMetaFilePath()).
+const SESSIONS_DEVICES_SUBDIR = "devices";
 const WEEKDAYS_DE = ["So", "Mo", "Di", "Mi", "Do", "Fr", "Sa"];
 
 // Erlaubt bei Token-Schwellwert-Eingaben neben exakten Zahlen ("120000")
@@ -386,8 +390,28 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
         dir: path.join(vaultBase, ".obsidian", "plugins", CLAUDIAN_PLUGIN_ID),
         isActivitySource: false,
       });
-      targets.push({ dir: path.join(vaultBase, ".claudian", "sessions"), isActivitySource: true });
+      const claudianSessionsDir = path.join(vaultBase, ".claudian", "sessions");
+      targets.push({ dir: claudianSessionsDir, isActivitySource: true });
       targets.push({ dir: this.resolveProjectDir(claudeDir, vaultBase), isActivitySource: true });
+
+      // Geräte-gebundene Unterordner (siehe findMetaFilePath/
+      // SESSIONS_DEVICES_SUBDIR) einzeln beobachten: fs.watch auf
+      // claudianSessionsDir oben ist bewusst NICHT rekursiv, würde Schreib-
+      // zugriffe dort also sonst verpassen und erst beim nächsten
+      // Timer-Fallback-Tick bemerken.
+      try {
+        const devicesDir = path.join(claudianSessionsDir, SESSIONS_DEVICES_SUBDIR);
+        if (fs.existsSync(devicesDir)) {
+          for (const entry of fs.readdirSync(devicesDir, { withFileTypes: true })) {
+            if (entry.isDirectory()) {
+              targets.push({ dir: path.join(devicesDir, entry.name), isActivitySource: true });
+            }
+          }
+        }
+      } catch (e) {
+        // Lesefehler/Rennen beim Auflisten – nächster Timer-Tick versucht es
+        // erneut, der Timer-Fallback greift bis dahin ohnehin.
+      }
     }
 
     for (const { dir, isActivitySource } of targets) {
@@ -675,6 +699,43 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
   // ---------- Zeile 2: Kontext-%/In-Out für den aktiven Tab ----------
 
+  // Ab Claudian 2.2.5 (per 2026-09-05 an echten Vault-Daten beobachtet) landet
+  // die *.meta.json neuer Sessions nicht mehr flach unter
+  // .claudian/sessions/<conversationId>.meta.json, sondern geräte-gebunden
+  // unter .claudian/sessions/devices/device-<Hash>/<conversationId>.meta.json
+  // (vermutlich zur Konfliktvermeidung bei Multi-Geräte-/Sync-Nutzung
+  // desselben Vaults). Sessions, die vor diesem Umbau entstanden sind, bleiben
+  // an der alten flachen Stelle liegen. Beide Orte werden unterstützt: neuer
+  // Ort zuerst (über alle vorhandenen Geräte-Ordner geprüft, da nicht bekannt
+  // ist, welcher Hash "dieses" Gerät ist – bei mehreren Treffern gewinnt der
+  // zuletzt geänderte), alter flacher Pfad als Fallback.
+  findMetaFilePath(vaultBase, conversationId) {
+    const sessionsDir = path.join(vaultBase, ".claudian", "sessions");
+    const devicesDir = path.join(sessionsDir, SESSIONS_DEVICES_SUBDIR);
+    const legacyPath = path.join(sessionsDir, `${conversationId}.meta.json`);
+
+    try {
+      if (fs.existsSync(devicesDir)) {
+        const candidates = fs
+          .readdirSync(devicesDir, { withFileTypes: true })
+          .filter((entry) => entry.isDirectory())
+          .map((entry) => path.join(devicesDir, entry.name, `${conversationId}.meta.json`))
+          .filter((p) => fs.existsSync(p));
+
+        if (candidates.length > 1) {
+          candidates.sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs);
+        }
+        if (candidates.length > 0) return candidates[0];
+      }
+    } catch (e) {
+      // Lesefehler im devices-Ordner (z. B. Rennen mit einem gerade
+      // angelegten Unterordner) – einfach auf den alten Pfad zurückfallen,
+      // der Timer-Fallback versucht es beim nächsten Tick erneut.
+    }
+
+    return legacyPath;
+  }
+
   getContextData() {
     const vaultBase = this.getVaultBasePath();
     if (!vaultBase) return { ok: false, message: "Ctx: – (Vault-Pfad nicht ermittelbar)" };
@@ -688,7 +749,7 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     const conversationId = activeTab && activeTab.conversationId;
     if (!conversationId) return { ok: false, message: "Ctx: – (kein aktiver Tab mit Conversation)" };
 
-    const metaFile = path.join(vaultBase, ".claudian", "sessions", `${conversationId}.meta.json`);
+    const metaFile = this.findMetaFilePath(vaultBase, conversationId);
     const meta = this.readJsonSafe(metaFile);
     if (!meta) {
       return { ok: false, message: "Ctx: – (kein Meta für diesen Tab gefunden)" };

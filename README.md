@@ -44,7 +44,7 @@ Claudian's own files.
 |---|---|---|
 | 5h/7d | `~/.claude/statusline-cache.json` (path overridable in plugin settings) | `five_hour.used_percentage`/`resets_at`, `seven_day.used_percentage`/`resets_at` |
 | Active tab | `<Vault>/.obsidian/plugins/realclaudian/data.json` | `tabManagerState.activeTabId`, `tabManagerState.openTabs[].conversationId` |
-| Context %/In | `<Vault>/.claudian/sessions/<conversationId>.meta.json` | `usage.percentage`, `usage.contextTokens`, `usage.contextWindow`, `usage.inputTokens`/`cacheCreationInputTokens`/`cacheReadInputTokens` |
+| Context %/In | `<Vault>/.claudian/sessions/<conversationId>.meta.json` **or** (Claudian 2.2.5+, new sessions) `<Vault>/.claudian/sessions/devices/device-<hash>/<conversationId>.meta.json` | `usage.percentage`, `usage.contextTokens`, `usage.contextWindow`, `usage.inputTokens`/`cacheCreationInputTokens`/`cacheReadInputTokens` |
 | Out | `~/.claude/projects/<sanitizedVaultPath>/<sessionId>.jsonl` (last assistant message) | `message.usage.output_tokens` |
 
 `sanitizedVaultPath` follows Claude Code's own scheme: the absolute vault
@@ -203,7 +203,12 @@ a plain query, not a generation.
   CSS classes `.claudian-input-nav-content`/`.claudian-tab-bar-container` or
   the format of `data.json`/`*.meta.json`, the status bar simply stays
   blank/invisible instead of crashing – in that case, check here whether
-  the selectors/fields changed and adjust `main.js` accordingly.
+  the selectors/fields changed and adjust `main.js` accordingly. Already
+  happened once and got fixed (see `findMetaFilePath()` in `main.js`): as of
+  Claudian 2.2.5, new sessions' `*.meta.json` moved to a per-device folder
+  under `.claudian/sessions/devices/device-<hash>/` instead of sitting flat
+  under `.claudian/sessions/` – since v1.9.0 both locations are supported
+  (new one first, old one as a fallback for older sessions).
 - **Windows: untested.** `fs.watch` itself is platform-neutral (uses
   `ReadDirectoryChangesW` internally on Windows instead of inotify) and
   should work without modification. The only uncertain part is whether
