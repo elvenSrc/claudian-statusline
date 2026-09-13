@@ -9,7 +9,9 @@
  * Bewusst als eigenständiges Plugin gebaut, das NICHTS an Claudian selbst
  * verändert:
  *   - Datenquellen sind ausschließlich Dateien, die Claude Code bzw.
- *     Claudian ohnehin selbst schreiben (~/.claude/statusline-cache.json,
+ *     Claudian ohnehin selbst schreiben (~/.claude/statusline-cache.json –
+ *     die schreibt allerdings nicht Claude Code selbst, sondern der vom
+ *     Nutzer eingerichtete statusLine-Befehl, siehe README –,
  *     <Vault>/.obsidian/plugins/realclaudian/data.json,
  *     <Vault>/.claudian/sessions/<conversationId>.meta.json).
  *   - Die Statusline wird per DOM-Injection in Claudians eigene Nav-Row
@@ -375,7 +377,8 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     //   1. Claudian-Traffic in diesem Vault (Session-Meta/Transkript)
     //   2. JEDE aktive `claude`-Terminal-CLI-Session, unabhängig von Vault
     //      oder Projekt: ~/.claude selbst (dort landet statusline-cache.json,
-    //      die die CLI bei jeder eigenen Statusline-Aktualisierung berührt)
+    //      die der vom Nutzer eingerichtete statusLine-Befehl bei jeder
+    //      Statusline-Aktualisierung einer CLI-Session schreibt)
     //      und ~/.claude/sessions/ (globale, prozessweite Session-Registry
     //      für alle laufenden Claude-Code-Prozesse, CLI wie SDK, egal in
     //      welchem Projekt).

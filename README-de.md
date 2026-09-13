@@ -13,7 +13,9 @@ Eigenständiges Obsidian-Sidecar-Plugin, das oberhalb des
   Claudian-Tabs. Wechselt automatisch mit, wenn ein anderer Tab gewählt wird.
 
 Kein Fork, kein Patch von Claudian: Das Plugin liest ausschließlich Dateien,
-die Claude Code bzw. Claudian ohnehin selbst schreiben, und hängt sein
+die Claude Code (für Zeile 1: dein eigener `statusLine`-Befehl, siehe
+[Voraussetzung für Zeile 1](#voraussetzung-für-zeile-1-ein-statusline-befehl))
+bzw. Claudian ohnehin selbst schreiben, und hängt sein
 eigenes DOM-Element per `insertBefore` in Claudians Oberfläche ein. Claudian
 selbst wird an keiner Stelle verändert.
 
@@ -44,7 +46,7 @@ Claudians eigene Dateien geschrieben.
 
 | Zeile | Datei | Felder |
 |---|---|---|
-| 5h/7d | `~/.claude/statusline-cache.json` (Pfad überschreibbar in den Plugin-Einstellungen) | `five_hour.used_percentage`/`resets_at`, `seven_day.used_percentage`/`resets_at` |
+| 5h/7d | `~/.claude/statusline-cache.json` (geschrieben von deinem eigenen `statusLine`-Befehl, siehe [unten](#voraussetzung-für-zeile-1-ein-statusline-befehl); Pfad überschreibbar in den Plugin-Einstellungen) | `five_hour.used_percentage`/`resets_at`, `seven_day.used_percentage`/`resets_at` |
 | Aktiver Tab | `<Vault>/.obsidian/plugins/realclaudian/data.json` | `tabManagerState.activeTabId`, `tabManagerState.openTabs[].conversationId` |
 | Kontext-%/In | `<Vault>/.claudian/sessions/<conversationId>.meta.json` **oder** (ab Claudian 2.2.5, neue Sessions) `<Vault>/.claudian/sessions/devices/device-<Hash>/<conversationId>.meta.json` | `usage.percentage`, `usage.contextTokens`, `usage.contextWindow`, `usage.inputTokens`/`cacheCreationInputTokens`/`cacheReadInputTokens` |
 | Out | `~/.claude/projects/<sanitizedVaultPath>/<sessionId>.jsonl` (letzte Assistant-Message) | `message.usage.output_tokens` |
@@ -56,6 +58,108 @@ wie bei den regulären `claude`-CLI-Projektordnern).
 Alle Zugriffe sind lesend, alle mit `try/catch` abgesichert. Fehlt eine
 Datei (z. B. weil noch nie eine Nachricht in diesem Tab gesendet wurde),
 erscheint ein `–` statt eines Fehlers.
+
+## Voraussetzung für Zeile 1: ein `statusLine`-Befehl
+
+Claude Code schreibt `~/.claude/statusline-cache.json` **nicht** von selbst.
+Was es tut: Bei jeder Statusline-Aktualisierung einer interaktiven `claude`-
+Terminal-Session übergibt es ein JSON-Objekt per stdin an den Befehl, der in
+`~/.claude/settings.json` als `statusLine` eingetragen ist – und dieses JSON
+enthält `rate_limits.five_hour` und `rate_limits.seven_day`. Zeile 1 braucht
+also einen `statusLine`-Befehl, der diese Werte in die Cache-Datei schreibt.
+Ohne ihn zeigt Zeile 1 nur `5h: – · 7d: – (keine statusline-cache.json
+gefunden)`.
+
+Das muss **einmal pro Rechner** eingerichtet werden (`settings.json` ist
+lokal) – entweder per `/statusline` (Variante A) oder von Hand mit einem der
+Skripte weiter unten (Variante B).
+
+### Variante A: `/statusline` (Kopiervorlage)
+
+Als eine einzige Zeile ins Claude-Code-Terminal einfügen (den ersten Satz
+nach Belieben anpassen – er bestimmt nur, was du selbst im Terminal siehst):
+
+```text
+/statusline Zeige die Modellbezeichnung an. Zusätzlich muss das Skript bei jedem Aufruf rate_limits.five_hour und rate_limits.seven_day aus dem stdin-JSON nach ~/.claude/statusline-cache.json schreiben, und zwar auf OBERSTER EBENE (nicht unter rate_limits verschachtelt), exakt in dieser Form: {"five_hour":{"used_percentage":<Zahl>,"resets_at":<Unix-Epoch-Sekunden>},"seven_day":{"used_percentage":<Zahl>,"resets_at":<Unix-Epoch-Sekunden>}}. Nur Fenster aufnehmen, bei denen used_percentage vorhanden ist, und die Datei gar nicht schreiben, wenn keines vorhanden ist (vorhandene Werte nie mit leeren überschreiben). Erst in eine Temp-Datei im selben Verzeichnis schreiben, dann über die Zieldatei umbenennen. UTF-8 ohne BOM. Unter Windows ein PowerShell-Skript (ohne Node/jq), unter Linux/macOS ein bash-Skript mit jq.
+```
+
+Danach im Terminal eine `claude`-Session starten, eine Nachricht senden und
+prüfen, ob `~/.claude/statusline-cache.json` dem unten gezeigten Format
+entspricht. Da `/statusline` sein Skript jedes Mal neu erzeugt, kann das
+Ergebnis variieren – passt es nicht, Variante B verwenden.
+
+### Benötigtes Format (für beide Varianten)
+
+Erwartetes Format – `five_hour`/`seven_day` **auf oberster Ebene** (nicht
+unter `rate_limits` verschachtelt), `resets_at` in Unix-Epoch-Sekunden, genau
+so, wie Claude Code es liefert:
+
+```json
+{"five_hour":{"used_percentage":28,"resets_at":1789299000},"seven_day":{"used_percentage":70,"resets_at":1789293600}}
+```
+
+Worauf das Skript achten sollte:
+
+- **Nur `five_hour`/`seven_day` schreiben**, nicht das komplette stdin-JSON –
+  das Plugin liest die Werte auf oberster Ebene.
+- **Nur schreiben, wenn Werte vorhanden sind.** `rate_limits` fehlt bzw. ist
+  `null` direkt nach dem Start einer Session (vor der ersten API-Antwort) und
+  bei API-Key-/Bedrock-/Vertex-Anmeldung. Wer ohne Prüfung schreibt, lässt
+  eine frische Session gute Werte mit leeren überschreiben.
+- **Erst in eine Temp-Datei schreiben, dann umbenennen**, damit das Plugin nie
+  eine halb geschriebene Datei liest.
+- **Kein UTF-8-BOM** – `JSON.parse` lehnt es ab (relevant bei PowerShell).
+
+### Variante B: Skript von Hand
+
+**Linux/macOS** (bash + `jq`), z. B. `~/.claude/statusline.sh`:
+
+```bash
+#!/usr/bin/env bash
+input=$(cat)
+cache="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/statusline-cache.json"
+rl=$(jq -c '(.rate_limits // {}) | {five_hour, seven_day}
+  | with_entries(select(.value.used_percentage != null)
+  | .value |= {used_percentage, resets_at})' <<<"$input")
+if [ -n "$rl" ] && [ "$rl" != "{}" ]; then
+  tmp="$cache.$$.tmp"
+  printf '%s' "$rl" > "$tmp" && mv -f "$tmp" "$cache"
+fi
+jq -r '.model.display_name // "Claude"' <<<"$input"   # sichtbare Statusline
+```
+
+```json
+"statusLine": { "type": "command", "command": "bash ~/.claude/statusline.sh" }
+```
+
+**Windows** (PowerShell 5.1, ohne Node/`jq`), z. B.
+`%USERPROFILE%\.claude\statusline.ps1`:
+
+```powershell
+$d = [Console]::In.ReadToEnd() | ConvertFrom-Json
+$dir = if ($env:CLAUDE_CONFIG_DIR) { $env:CLAUDE_CONFIG_DIR } else { Join-Path $env:USERPROFILE '.claude' }
+$cache = [ordered]@{}
+foreach ($k in 'five_hour', 'seven_day') {
+  $w = $d.rate_limits.$k
+  if ($w -and $null -ne $w.used_percentage) {
+    $cache[$k] = [ordered]@{ used_percentage = $w.used_percentage; resets_at = $w.resets_at }
+  }
+}
+if ($cache.Count) {
+  $target = Join-Path $dir 'statusline-cache.json'
+  $tmp = "$target.$PID.tmp"
+  [IO.File]::WriteAllText($tmp, ($cache | ConvertTo-Json -Depth 3 -Compress), (New-Object Text.UTF8Encoding $false))
+  Move-Item -LiteralPath $tmp -Destination $target -Force
+}
+Write-Output $d.model.display_name   # sichtbare Statusline
+```
+
+```json
+"statusLine": { "type": "command", "command": "powershell -NoProfile -ExecutionPolicy Bypass -File C:/Users/<du>/.claude/statusline.ps1" }
+```
+
+Die sichtbare Statusline im Terminal lässt sich beliebig erweitern – nur die
+Cache-Datei muss dieses Format behalten.
 
 ## Wie die Aktualisierung funktioniert
 
@@ -103,8 +207,9 @@ vorigen Turns zeigen.
 
 Normalerweise stammt Zeile 1 aus `~/.claude/statusline-cache.json` – diese
 Datei wird aber nur aktualisiert, wenn irgendwo eine echte `claude`-
-Terminal-CLI-Session läuft (die eigene Statusline-Logik der CLI schreibt
-sie). Claudians `sdk-ts`-Sessions lösen das nicht aus – selbst bei aktivem
+Terminal-CLI-Session läuft, denn nur diese führt deinen `statusLine`-Befehl
+aus (siehe [Voraussetzung für Zeile 1](#voraussetzung-für-zeile-1-ein-statusline-befehl)).
+Claudians `sdk-ts`-Sessions lösen ihn nicht aus – selbst bei aktivem
 Traffic bleibt die Datei unverändert.
 
 Optional kann das Plugin die 5h-/7d-Werte stattdessen **direkt live**
@@ -125,8 +230,9 @@ es ist eine reine Abfrage, keine Generation.
   läuft – egal ob über **Claudian in diesem Vault** (Schreibzugriffe auf
   `.claudian/sessions` bzw. das Transkript-Verzeichnis) oder über eine
   **`claude`-Terminal-CLI-Session irgendwo auf dieser Maschine**
-  (Schreibzugriffe auf `~/.claude` selbst, wo `statusline-cache.json` bei
-  jeder eigenen CLI-Statusline-Aktualisierung berührt wird, sowie auf
+  (Schreibzugriffe auf `~/.claude` selbst, wo dein `statusLine`-Befehl
+  `statusline-cache.json` bei jeder CLI-Statusline-Aktualisierung
+  aktualisiert, sowie auf
   `~/.claude/sessions/`, die globale, prozessweite Registry aller laufenden
   Claude-Code-Sessions, unabhängig von Projekt oder Vault):
   1. Erste Aktivität → sofortiger Abruf, danach Polling im konfigurierten
@@ -215,7 +321,12 @@ es ist eine reine Abfrage, keine Generation.
   geräte-gebunden unter `.claudian/sessions/devices/device-<Hash>/` statt
   flach unter `.claudian/sessions/` – seit v1.9.0 werden beide Orte
   unterstützt (neuer zuerst, alter als Fallback für ältere Sessions).
-- **Windows: ungetestet.** `fs.watch` selbst ist plattformneutral (nutzt
+- **Windows: nur teilweise getestet.** Zeile 1 funktioniert nachweislich
+  unter Windows 10, sobald ein `statusLine`-Befehl die Cache-Datei schreibt
+  (PowerShell-Skript, siehe
+  [Voraussetzung für Zeile 1](#voraussetzung-für-zeile-1-ein-statusline-befehl)) –
+  ohne ihn erscheint "keine statusline-cache.json gefunden", was kein
+  Windows-Fehler ist. Der Rest ist ungetestet. `fs.watch` selbst ist plattformneutral (nutzt
   unter Windows intern `ReadDirectoryChangesW` statt inotify) und sollte
   ohne Anpassung funktionieren. Unsicher ist nur, ob `resolveProjectDir()`
   (Ermittlung von `~/.claude/projects/<sanitizerVaultPfad>/`) exakt
