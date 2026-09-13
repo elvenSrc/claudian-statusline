@@ -65,6 +65,10 @@ const DEFAULT_SETTINGS = {
   // ctxCustomPercent(). Opt-in, damit sich für Bestandsnutzer nichts
   // stillschweigend ändert.
   ctxNormalizePercent: false,
+  // Wochentag+Datum stehen standardmäßig nur als Tooltip über der Reset-
+  // Uhrzeit (5h-Datum über der 5h-Uhrzeit, 7d-Datum über der 7d-Uhrzeit) –
+  // hier zusätzlich als "(Sa, 13.09.2026)" inline einblendbar.
+  showResetDateInline: false,
   useLiveRateLimitApi: false, // inoffizieller Endpunkt, siehe oben – standardmäßig aus
   // Aktivitätsgetrieben statt Dauerpolling (siehe noteActivity):
   // liveApiRefreshSeconds gilt nur, SOLANGE gerade Traffic läuft.
@@ -322,8 +326,8 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
       this.liveRateLimitData = {
         ok: true,
-        five: { pctNum: fivePct, pctStr: this.roundPct(fiveRaw), resetStr: this.formatResetTime(five.resets_at) },
-        week: { pctNum: weekPct, pctStr: this.roundPct(weekRaw), resetStr: this.formatResetTime(week.resets_at) },
+        five: { pctNum: fivePct, pctStr: this.roundPct(fiveRaw), reset: this.formatResetTime(five.resets_at) },
+        week: { pctNum: weekPct, pctStr: this.roundPct(weekRaw), reset: this.formatResetTime(week.resets_at) },
       };
       this.liveRateLimitError = null;
       this.log("Live-Rate-Limit-Abfrage erfolgreich:", this.liveRateLimitData);
@@ -552,29 +556,31 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       five: {
         pctNum: this.pctNumber(five.used_percentage),
         pctStr: this.roundPct(five.used_percentage),
-        resetStr: this.formatResetTime(five.resets_at),
+        reset: this.formatResetTime(five.resets_at),
       },
       week: {
         pctNum: this.pctNumber(week.used_percentage),
         pctStr: this.roundPct(week.used_percentage),
-        resetStr: this.formatResetTime(week.resets_at),
+        reset: this.formatResetTime(week.resets_at),
       },
     };
   }
 
   renderRateLimitRow(row1) {
     row1.textContent = "";
+    row1.title = "";
 
     // Dezenter Tooltip-Hinweis, falls Live-API aktiv ist, aber gerade nicht
-    // liefert (dann läuft der Fallback auf die Datei-basierten Werte).
+    // liefert (dann läuft der Fallback auf die Datei-basierten Werte) –
+    // hängt weiter unten am "⚠"-Zeichen, nicht mehr an der ganzen Zeile.
     const liveFailingSilently = this.settings.useLiveRateLimitApi && this.liveRateLimitError && !this.liveRateLimitData;
-    if (liveFailingSilently) {
-      row1.title = `Live-API nicht erreichbar, zeige Datei-basierte Werte: ${this.liveRateLimitError}`;
-    } else if (this.settings.useLiveRateLimitApi && this.liveRateLimitData) {
-      row1.title = "Live via inoffizielle Anthropic-API abgefragt.";
-    } else {
-      row1.title = "";
-    }
+    // "Live via ..."-Tooltip: hängt weiter unten gezielt am jeweiligen 5h-/
+    // 7d-Balken (bzw. an der %-Zahl, falls der Balken abgeschaltet ist),
+    // nicht mehr an der ganzen Zeile.
+    const liveTooltip =
+      this.settings.useLiveRateLimitApi && this.liveRateLimitData
+        ? "Live via inoffizielle Anthropic-API abgefragt."
+        : null;
 
     const data = this.getRateLimitData();
     if (!data.ok) {
@@ -582,19 +588,55 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       return;
     }
 
-    const mode = this.settings.progressBarMode;
     const frag = document.createDocumentFragment();
+    this.appendRateLimitEntry(frag, "5h", data.five, liveTooltip);
+    frag.appendChild(document.createTextNode("   |   "));
+    this.appendRateLimitEntry(frag, "7d", data.week, liveTooltip);
 
-    frag.appendChild(document.createTextNode("5h: "));
-    if (mode !== "replace") frag.appendChild(document.createTextNode(`${data.five.pctStr} `));
-    if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(data.five.pctNum));
-    frag.appendChild(document.createTextNode(` · Reset ${data.five.resetStr}   |   7d: `));
-    if (mode !== "replace") frag.appendChild(document.createTextNode(`${data.week.pctStr} `));
-    if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(data.week.pctNum));
-    frag.appendChild(document.createTextNode(` · Reset ${data.week.resetStr}`));
-    if (liveFailingSilently) frag.appendChild(document.createTextNode(" ⚠"));
+    if (liveFailingSilently) {
+      const warn = document.createElement("span");
+      warn.textContent = " ⚠";
+      warn.title = `Live-API nicht erreichbar, zeige Datei-basierte Werte: ${this.liveRateLimitError}`;
+      frag.appendChild(warn);
+    }
 
     row1.appendChild(frag);
+  }
+
+  // Baut "5h: 45% [Balken] · Reset 14:32" (bzw. 7d-Pendant). Der Live-
+  // Tooltip landet gezielt auf dem Balken – gibt es keinen (progressBarMode
+  // "off"), weicht er auf die %-Zahl aus, damit er nicht verloren geht.
+  appendRateLimitEntry(frag, label, entry, liveTooltip) {
+    const mode = this.settings.progressBarMode;
+    frag.appendChild(document.createTextNode(`${label}: `));
+
+    let tooltipTarget = null;
+    if (mode !== "replace") {
+      const pctSpan = document.createElement("span");
+      pctSpan.textContent = `${entry.pctStr} `;
+      frag.appendChild(pctSpan);
+      tooltipTarget = pctSpan;
+    }
+    if (mode === "additional" || mode === "replace") {
+      const bar = this.createBarEl(entry.pctNum);
+      frag.appendChild(bar);
+      tooltipTarget = bar;
+    }
+    if (liveTooltip && tooltipTarget) tooltipTarget.title = liveTooltip;
+
+    frag.appendChild(document.createTextNode(" · Reset "));
+    frag.appendChild(this.createResetTimeEl(entry.reset));
+  }
+
+  // Uhrzeit als Text, Wochentag+Datum als Tooltip darüber (bzw. zusätzlich
+  // inline in Klammern, falls showResetDateInline aktiv ist).
+  createResetTimeEl(reset) {
+    const span = document.createElement("span");
+    const hasDate = reset.dateStr !== "–";
+    const inlineDate = hasDate && this.settings.showResetDateInline ? ` (${reset.dateStr})` : "";
+    span.textContent = `${reset.timeStr}${inlineDate}`;
+    if (hasDate) span.title = reset.dateStr;
+    return span;
   }
 
   roundPct(value) {
@@ -679,8 +721,12 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     return (tokens / redThreshold) * 100;
   }
 
+  // Liefert Uhrzeit und Wochentag+Datum getrennt (statt eines fertigen
+  // Strings), damit der Aufrufer das Datum gezielt als Tooltip über der
+  // Uhrzeit platzieren kann (siehe createResetTimeEl) statt es fest inline
+  // anzuhängen.
   formatResetTime(resetsAt) {
-    if (resetsAt == null || resetsAt === "") return "–";
+    if (resetsAt == null || resetsAt === "") return { timeStr: "–", dateStr: "–" };
     // Die Datei-basierte Quelle liefert Epoch-Sekunden als String/Zahl, die
     // (inoffizielle) Live-API liefert laut Beobachtung ISO-8601 – beides
     // abdecken.
@@ -690,14 +736,14 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     } else {
       d = new Date(resetsAt);
     }
-    if (isNaN(d.getTime())) return "–";
+    if (isNaN(d.getTime())) return { timeStr: "–", dateStr: "–" };
     const pad = (n) => String(n).padStart(2, "0");
     const hh = pad(d.getHours());
     const mm = pad(d.getMinutes());
     const dd = pad(d.getDate());
     const mo = pad(d.getMonth() + 1);
     const yyyy = d.getFullYear();
-    return `${hh}:${mm} (${WEEKDAYS_DE[d.getDay()]}, ${dd}.${mo}.${yyyy})`;
+    return { timeStr: `${hh}:${mm}`, dateStr: `${WEEKDAYS_DE[d.getDay()]}, ${dd}.${mo}.${yyyy}` };
   }
 
   // ---------- Zeile 2: Kontext-%/In-Out für den aktiven Tab ----------
@@ -799,15 +845,31 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
       }
     }
 
+    const outTokens = liveUsage && typeof liveUsage.output_tokens === "number" ? liveUsage.output_tokens : null;
+    const outStr = outTokens != null ? this.formatTokens(outTokens) : "–";
+
     if (!meta.usage || metaUsageStale) {
       if (liveUsage) {
+        // Live-Fallback: Claudian hat für diesen Turn noch kein eigenes
+        // "usage" geschrieben, also gibt es keinen von Claudian gemeldeten
+        // %-Wert. Eine SCHÄTZUNG lässt sich trotzdem bilden, sofern aus einem
+        // früheren Turn dieser Session bereits ein Kontextfenster bekannt ist
+        // – usage.contextWindow bleibt gültig, auch wenn der Rest von
+        // meta.usage inzwischen veraltet ist, da sich die Fenstergröße nicht
+        // durch neue Turns ändert. Fehlt jede frühere meta.usage (frischer
+        // Tab, neue Conversation nach /clear), bleibt der %-Wert "–".
+        const knownCtxWindow =
+          meta.usage && Number.isFinite(meta.usage.contextWindow) ? meta.usage.contextWindow : null;
+        const pctNum = knownCtxWindow ? (liveTokens / knownCtxWindow) * 100 : null;
         return {
           ok: true,
           isLive: true,
+          pctNum,
+          pctStr: this.roundPct(pctNum),
           ctxTokensNum: liveTokens,
-          ctxTokensStr: this.formatTokens(liveTokens),
           inStr: this.formatTokens(liveTokens),
-          outStr: typeof liveUsage.output_tokens === "number" ? this.formatTokens(liveUsage.output_tokens) : "–",
+          cacheStr: this.formatTokens(liveUsage.cache_read_input_tokens || 0),
+          outStr,
         };
       }
       if (!meta.usage) {
@@ -820,22 +882,21 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
 
     const usage = meta.usage;
     const pctNum = usage.percentage != null ? Number(usage.percentage) : null;
-    const ctxTokens = usage.contextTokens;
-    const ctxWindow = usage.contextWindow;
+    // usage.contextTokens entspricht empirisch immer inTokens (beides die
+    // Summe aus Input- und Cache-Tokens) – daher hier nur noch EINE Quelle
+    // statt beide separat zu führen und doppelt anzuzeigen.
     const inTokens =
       (usage.inputTokens || 0) + (usage.cacheCreationInputTokens || 0) + (usage.cacheReadInputTokens || 0);
-    const outTokens = liveUsage && typeof liveUsage.output_tokens === "number" ? liveUsage.output_tokens : null;
 
     return {
       ok: true,
       isLive: false,
       pctNum: Number.isFinite(pctNum) ? pctNum : null,
-      pctStr: pctNum != null ? `${Math.round(pctNum)}%` : "–",
-      ctxTokensNum: typeof ctxTokens === "number" && Number.isFinite(ctxTokens) ? ctxTokens : null,
-      ctxStr:
-        ctxTokens != null && ctxWindow ? `${this.formatTokens(ctxTokens)}/${this.formatTokens(ctxWindow)}` : "–",
+      pctStr: this.roundPct(pctNum),
+      ctxTokensNum: inTokens,
       inStr: this.formatTokens(inTokens),
-      outStr: outTokens != null ? this.formatTokens(outTokens) : "–",
+      cacheStr: this.formatTokens(usage.cacheReadInputTokens || 0),
+      outStr,
     };
   }
 
@@ -850,63 +911,70 @@ module.exports = class ClaudianStatuslinePlugin extends Plugin {
     }
 
     const frag = document.createDocumentFragment();
-
     const mode = this.settings.progressBarMode;
+
     // Nur bei Farbbasis "Tokenzahl" sinnvoll: die angezeigte %-Zahl auf den
     // eigenen Rot-Schwellwert normieren (100 % = eigener Warnwert) statt den
-    // echten, von Claudian gemeldeten %-Wert zu zeigen – siehe
-    // ctxCustomPercent(). Kann bewusst über 100 % steigen.
+    // echten bzw. geschätzten %-Wert zu zeigen – siehe ctxCustomPercent().
+    // Anders als die Balkenlänge wird sie bewusst NICHT auf 100 gedeckelt, so
+    // ist sichtbar, um wie viel man den eigenen Warnwert bereits
+    // überschritten hat, statt dass die Anzeige bei 100 % steckenbleibt.
     const useCustomPercent = this.settings.ctxColorMode === "tokens" && this.settings.ctxNormalizePercent;
+    const customPctNum = useCustomPercent ? this.ctxCustomPercent(data.ctxTokensNum) : null;
+    // "~" markiert Schätzwerte: Live-Fallback, bevor Claudian den offiziellen
+    // Wert für diesen Turn geschrieben hat (siehe getContextData) – nur vor
+    // eine echte Zahl gesetzt, nicht vor "–" (kein bekanntes Kontextfenster).
+    const havePctValue = customPctNum != null || data.pctNum != null;
+    const approx = data.isLive && havePctValue ? "~" : "";
+    const displayPctStr = customPctNum != null ? `${approx}${Math.round(customPctNum)}%` : `${approx}${data.pctStr}`;
 
-    if (data.isLive) {
-      // Vorläufige, live aus dem JSONL-Transkript berechnete Werte (siehe
-      // getContextData) – ohne eigene Normierung noch keine %-Angabe möglich,
-      // da Claudian das Kontextfenster/die %-Berechnung erst nach
-      // Turn-Abschluss liefert. Ein Balken lässt sich hier trotzdem zeigen,
-      // sofern die Ctx-Farbbasis auf "Tokenzahl" steht (siehe
-      // ctxTokenBarWidthPct) – bei Farbbasis "Prozent" bleibt der Balken hier
-      // weiterhin aus, da dafür schlicht kein %-Wert existiert.
-      const customPctNum = useCustomPercent ? this.ctxCustomPercent(data.ctxTokensNum) : null;
-      const customPctSuffix = customPctNum != null ? ` (${Math.round(customPctNum)}%)` : "";
-      frag.appendChild(document.createTextNode(`Ctx: ~${data.ctxTokensStr}${customPctSuffix} (live, vorläufig) `));
-      if (mode !== "off" && this.settings.ctxColorMode === "tokens") {
-        const widthPct = this.ctxTokenBarWidthPct(data.ctxTokensNum);
-        const color = this.colorForCtx(null, data.ctxTokensNum);
-        frag.appendChild(this.createBarEl(widthPct, color));
-        frag.appendChild(document.createTextNode(" "));
-      }
-      frag.appendChild(document.createTextNode(`· In: ${data.inStr} · Out: ${data.outStr}`));
-      if (customPctNum != null) {
-        row2.title = `Auf eigenen Rot-Schwellwert normierter Wert (100 % = ${this.formatTokens(
-          this.settings.ctxThresholdRedTokens
-        )}). Echter %-Wert lt. Claudian liegt hier noch nicht vor (Antwort läuft noch).`;
-      }
-    } else {
-      const color = this.colorForCtx(data.pctNum, data.ctxTokensNum);
-      // Balkenlänge (nicht nur Farbe!) richtet sich bei Farbbasis "Tokenzahl"
-      // ebenfalls nach dem Rot-Schwellwert statt nach dem echten, von
-      // Claudian gemeldeten %-Wert – der Rot-Schwellwert entspricht dann
-      // also "100 % Balkenlänge", unabhängig vom tatsächlichen Kontextfenster.
-      const barWidthPct =
-        this.settings.ctxColorMode === "tokens" ? this.ctxTokenBarWidthPct(data.ctxTokensNum) : data.pctNum;
-      // Anders als die Balkenlänge wird die %-ZAHL hier bewusst NICHT auf 100
-      // gedeckelt (siehe ctxCustomPercent) – so ist sichtbar, um wie viel man
-      // den eigenen Warnwert bereits überschritten hat, statt dass die
-      // Anzeige bei 100 % steckenbleibt.
-      const customPctNum = useCustomPercent ? this.ctxCustomPercent(data.ctxTokensNum) : null;
-      const displayPctStr = customPctNum != null ? `${Math.round(customPctNum)}%` : data.pctStr;
-      frag.appendChild(document.createTextNode("Ctx: "));
-      if (mode !== "replace") frag.appendChild(document.createTextNode(`${displayPctStr} `));
-      if (mode === "additional" || mode === "replace") frag.appendChild(this.createBarEl(barWidthPct, color));
-      frag.appendChild(
-        document.createTextNode(` (${data.ctxStr}) · In: ${data.inStr} · Out: ${data.outStr}`)
-      );
-      if (customPctNum != null) {
-        row2.title = `Auf eigenen Rot-Schwellwert normiert (100 % = ${this.formatTokens(
-          this.settings.ctxThresholdRedTokens
-        )}). Echter %-Wert lt. Claudian: ${data.pctStr}.`;
-      }
+    // Balkenlänge (nicht nur Farbe!) richtet sich bei Farbbasis "Tokenzahl"
+    // nach dem Rot-Schwellwert statt nach dem %-Wert – der Rot-Schwellwert
+    // entspricht dann also "100 % Balkenlänge", unabhängig vom tatsächlichen
+    // Kontextfenster. Bei Farbbasis "Prozent" im Live-Fallback ohne bekanntes
+    // Kontextfenster ist data.pctNum null → leerer/grauer Balken statt Absturz.
+    const barWidthPct =
+      this.settings.ctxColorMode === "tokens" ? this.ctxTokenBarWidthPct(data.ctxTokensNum) : data.pctNum;
+    const color = this.colorForCtx(data.pctNum, data.ctxTokensNum);
+
+    frag.appendChild(document.createTextNode("Ctx: "));
+
+    // Normierungs-Tooltip nur auf %-Text UND Balken (beide, sofern
+    // vorhanden), nicht auf der ganzen Zeile (die auch In/Out sowie ggf. den
+    // Live-Hinweis enthält, siehe unten).
+    const normalizeTooltipTargets = [];
+    if (mode !== "replace") {
+      const pctSpan = document.createElement("span");
+      pctSpan.textContent = `${displayPctStr} `;
+      frag.appendChild(pctSpan);
+      normalizeTooltipTargets.push(pctSpan);
     }
+    if (mode === "additional" || mode === "replace") {
+      const bar = this.createBarEl(barWidthPct, color);
+      frag.appendChild(bar);
+      normalizeTooltipTargets.push(bar);
+    }
+    if (customPctNum != null) {
+      const normalizeTitle = data.isLive
+        ? `Auf eigenen Rot-Schwellwert normierter Schätzwert (100 % = ${this.formatTokens(
+            this.settings.ctxThresholdRedTokens
+          )}). Echter %-Wert lt. Claudian liegt hier noch nicht vor (Antwort läuft noch).`
+        : `Auf eigenen Rot-Schwellwert normiert (100 % = ${this.formatTokens(
+            this.settings.ctxThresholdRedTokens
+          )}). Echter %-Wert lt. Claudian: ${data.pctStr}.`;
+      normalizeTooltipTargets.forEach((el) => (el.title = normalizeTitle));
+    }
+
+    // In/Out (inkl. Cache-Anteil von In) plus Live-Hinweis – als eigener
+    // Tooltip-Bereich, getrennt vom Normierungs-Tooltip oben.
+    const ioSpan = document.createElement("span");
+    ioSpan.textContent = ` · In: ${data.inStr} (${data.cacheStr}) · Out: ${data.outStr}${data.isLive ? " (live)" : ""}`;
+    if (data.isLive) {
+      ioSpan.title =
+        "Vorläufiger Live-Wert direkt aus dem Transkript berechnet – Claudian hat die offiziellen Werte " +
+        "für diesen Turn noch nicht geschrieben.";
+    }
+    frag.appendChild(ioSpan);
 
     row2.appendChild(frag);
   }
@@ -1259,6 +1327,21 @@ class ClaudianStatuslineSettingTab extends PluginSettingTab {
           const n = parseInt(v, 10);
           this.plugin.settings.thresholdRed =
             Number.isFinite(n) && n >= 0 && n <= 100 ? n : DEFAULT_SETTINGS.thresholdRed;
+          await this.plugin.saveSettings();
+          this.plugin.refreshAll();
+        })
+      );
+
+    new Setting(containerEl)
+      .setName("Reset-Datum inline anzeigen (5h/7d)")
+      .setDesc(
+        "Wochentag+Datum stehen standardmäßig nur als Tooltip beim Überfahren " +
+          "der Reset-Uhrzeit. Hier zusätzlich fest als \"(Sa, 13.09.2026)\" " +
+          "dahinter einblendbar."
+      )
+      .addToggle((t) =>
+        t.setValue(this.plugin.settings.showResetDateInline).onChange(async (v) => {
+          this.plugin.settings.showResetDateInline = v;
           await this.plugin.saveSettings();
           this.plugin.refreshAll();
         })

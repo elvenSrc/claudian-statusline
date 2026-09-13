@@ -184,14 +184,18 @@ Claudian ohnehin selbst auf die Platte schreiben (siehe Tabelle oben).
 `*.meta.json` erst, **nachdem** eine Antwort vollständig abgeschlossen ist –
 nicht laufend während der Generierung. Solange das noch aussteht (frischer
 Tab, oder eine Antwort läuft gerade), zeigt Zeile 2 stattdessen einen
-**Live-Fallback**: `Ctx: ~X (live, vorläufig) · In: … · Out: …`, direkt aus
-dem JSONL-Transkript der Session berechnet (dieselbe Quelle, aus der auch
-`claude_tools/statusline-viewer-py` liest) – ohne %-Angabe, da das
-Kontextfenster dafür noch nicht bekannt ist. Sobald Claudian die Antwort
-abschließt und `usage` schreibt, springt die Zeile automatisch auf die
-vollständige Ansicht mit %-Wert um. Nur bei einem wirklich leeren Tab ganz
-ohne jede Aktivität bleibt "Ctx: – (noch keine Nutzungsdaten für diesen Tab)"
-stehen.
+**Live-Fallback**: `Ctx: ~X% [Balken] · In: … (…) · Out: … (live)`, direkt
+aus dem JSONL-Transkript der Session berechnet (dieselbe Quelle, aus der auch
+`claude_tools/statusline-viewer-py` liest). Der `~X%`-Wert ist eine
+**Schätzung**, basierend auf der Kontextfenstergröße aus einem früheren Turn
+dieser Conversation (die Fenstergröße ändert sich nicht von Turn zu Turn,
+eine veraltete `usage` liefert also trotzdem eine gültige Basis) – nur wenn
+gar keine frühere `usage` existiert (frischer Tab, oder eine neue Conversation
+direkt nach `/clear`), bleibt der %-Wert bei "–". Sobald Claudian die Antwort
+abschließt und eine frische `usage` schreibt, springt die Zeile automatisch
+auf den exakten, nicht mehr geschätzten Wert um. Nur bei einem wirklich
+leeren Tab ganz ohne jede Aktivität bleibt
+"Ctx: – (noch keine Nutzungsdaten für diesen Tab)" stehen.
 
 Dieser Live-Fallback greift dabei nicht nur beim allerersten Turn eines
 frischen Tabs, sondern auch bei **jedem weiteren** Turn (und direkt nach
@@ -247,9 +251,10 @@ es ist eine reine Abfrage, keine Generation.
   beim Einschalten bzw. Plugin-Start, damit sofort etwas angezeigt wird.
 - Beide Intervalle (Poll-Intervall während Aktivität, Ruhezeit bis Pause)
   sind in den Einstellungen konfigurierbar.
-- Ein kleiner Tooltip auf Zeile 1 zeigt an, ob gerade live oder per
-  Datei-Fallback abgefragt wird; bei einem Live-Fehler erscheint zusätzlich
-  ein sichtbares "⚠" direkt in der Zeile.
+- Ein kleiner Tooltip auf dem jeweiligen 5h-/7d-Balken (bzw. auf der %-Zahl,
+  falls Balken abgeschaltet sind) zeigt an, dass gerade live abgefragt wird;
+  bei einem Live-Fehler erscheint zusätzlich ein sichtbares "⚠" direkt in der
+  Zeile, mit der Fehlermeldung als eigenem Tooltip.
 - Antwortet der Endpunkt mit HTTP 200, aber in einem unerwarteten Format
   (z. B. weil sich der inoffizielle Endpunkt geändert hat), wird das **nicht**
   als gültiger Wert übernommen, sondern ebenfalls als Fehler behandelt – so
@@ -274,13 +279,13 @@ es ist eine reine Abfrage, keine Generation.
     "Prozent" (eigene %-Schwellwerte, analog zu 5h/7d) oder "Tokenzahl"
     (Schwellwerte als absolute Anzahl Kontext-Tokens, Standard: 120.000 /
     170.000 – Eingabe auch als Kurzschreibweise möglich, z. B. `120k`, `1M`
-    oder `0,17M`, mit Komma oder Punkt als Dezimaltrennzeichen). Tokenbasiert
-    ist besonders im **"live, vorläufig"-Fallback**
-    nützlich: Dort ist noch kein %-Wert bekannt (Claudian liefert das
-    Kontextfenster erst nach Turn-Abschluss), sodass sich der Balken nur mit
-    Tokenbasis überhaupt einfärben und anzeigen lässt – bei Farbbasis
-    "Prozent" bleibt er in diesem Zustand weiterhin aus. Bei Farbbasis
-    "Tokenzahl" wird zudem die **Balkenlänge selbst** auf den Rot-Schwellwert
+    oder `0,17M`, mit Komma oder Punkt als Dezimaltrennzeichen). Im
+    **"live, vorläufig"-Fallback** (siehe oben) existiert ein echter %-Wert
+    nur, sobald eine frühere `usage` dieser Conversation bekannt ist – bis
+    dahin lässt sich der Balken nur mit Farbbasis "Tokenzahl" überhaupt
+    einfärben/anzeigen, da diese direkt mit der rohen Tokenzahl statt einem
+    %-Wert arbeitet. Bei Farbbasis "Tokenzahl" wird zudem die
+    **Balkenlänge selbst** auf den Rot-Schwellwert
     normiert (der Rot-Schwellwert entspricht also "100 % Balkenlänge"), statt
     auf das tatsächliche, meist deutlich größere Kontextfenster – so wird der
     selbst gesetzte Warnbereich auch optisch sichtbar ausgefüllt, statt dass
@@ -293,8 +298,14 @@ es ist eine reine Abfrage, keine Generation.
     die Balkenlänge aber bewusst **ohne Deckelung bei 100 %**: Wird der
     eigene Schwellwert überschritten, steigt die Anzeige entsprechend darüber
     (z. B. 118 %), sodass sofort sichtbar ist, um wie viel der selbst
-    gesetzte, sicher geglaubte Rahmen bereits überschritten wurde. Der echte,
-    von Claudian gemeldete %-Wert bleibt per Tooltip auf der Zeile abrufbar.
+    gesetzte, sicher geglaubte Rahmen bereits überschritten wurde. Der echte
+    (bzw. im Live-Fallback geschätzte), von Claudian gemeldete %-Wert bleibt
+    per Tooltip abrufbar – und zwar sowohl auf der %-Zahl als auch auf dem
+    Balken, nicht auf der ganzen Zeile.
+- **Reset-Datum inline anzeigen (5h/7d)** (Standard: aus). Wochentag+Datum
+  der jeweiligen Reset-Uhrzeit stehen immer als Tooltip zur Verfügung (5h-Datum
+  über der 5h-Uhrzeit, 7d-Datum über der 7d-Uhrzeit); diese Einstellung blendet
+  es zusätzlich inline ein, z. B. `14:32 (Sa, 13.09.2026)`.
 - Claude-Verzeichnis überschreibbar (bei `CLAUDE_CONFIG_DIR`/portabler
   Installation abweichend von `~/.claude`)
 - **Debug-Logging** (Konsole): schreibt Aktualisierungszyklen, gelesene Werte

@@ -181,12 +181,16 @@ Code/Claudian write to disk anyway (see table above).
 `*.meta.json` **after** a response has fully completed – not continuously
 during generation. While that's still pending (fresh tab, or a response is
 currently streaming), line 2 instead shows a **live fallback**:
-`Ctx: ~X (live, preliminary) · In: … · Out: …`, computed directly from the
+`Ctx: ~X% [bar] · In: … (…) · Out: … (live)`, computed directly from the
 session's JSONL transcript (the same source `claude_tools/
-statusline-viewer-py` reads from) – without a % value, since the context
-window isn't known yet at that point. Once Claudian finishes the response
-and writes `usage`, the line automatically switches to the full view with a
-% value. Only for a genuinely empty tab with no activity at all does
+statusline-viewer-py` reads from). The `~X%` is an *estimate*, based on the
+context window size from an earlier turn's `usage` in this same
+conversation (window size doesn't change turn to turn, so a stale `usage`
+object still gives a valid basis) – only when no such earlier `usage` exists
+at all (fresh tab, or a new conversation right after `/clear`) does the %
+stay `–`. Once Claudian finishes the response and writes a fresh `usage`,
+the line automatically switches to the exact, non-estimated value. Only for
+a genuinely empty tab with no activity at all does
 "Ctx: – (no usage data yet for this tab)" stay as-is.
 
 This live fallback doesn't only kick in for a tab's very first turn — it
@@ -243,9 +247,10 @@ a plain query, not a generation.
   on plugin startup, so something is shown right away.
 - Both intervals (poll interval while active, idle time until pausing) are
   configurable in settings.
-- A small tooltip on line 1 indicates whether it's currently querying live
-  or falling back to the file; on a live error, a visible "⚠" also appears
-  directly in the line.
+- A small tooltip on the respective 5h/7d bar (or on the % number, if bars
+  are switched off) indicates that it's currently querying live; on a live
+  error, a visible "⚠" also appears directly in the line, with the error
+  detail as its own tooltip.
 - If the endpoint responds with HTTP 200 but in an unexpected format (e.g.
   because the unofficial endpoint changed), that response is **not**
   accepted as valid data – it's treated as an error instead, so the line
@@ -268,13 +273,13 @@ a plain query, not a generation.
     thresholds, mirroring 5h/7d) or "Token count" (thresholds as an absolute
     number of context tokens, default: 120,000 / 170,000 – shorthand input
     also accepted, e.g. `120k`, `1M`, or `0.14M`, with either a comma or a
-    period as the decimal separator). Token-based is especially useful in the
-    **"live, preliminary" fallback**: no % value is known there yet (Claudian
-    only reports the context window after a turn finishes), so token-based is
-    the only way to color and show the bar at all in that state – with
-    "Percent" it simply stays off there. With "Token count", the **bar length
-    itself** is also normalized to the red threshold (red = 100% bar length)
-    instead of to the actual, usually much larger context window – so your
+    period as the decimal separator). In the **"live, preliminary" fallback**
+    (see above), a real % only exists once an earlier `usage` in this
+    conversation is known – until then, "Token count" is the only way to
+    color/size the bar at all, since it works from the raw token count
+    directly instead of a %.  With "Token count", the **bar length itself**
+    is also normalized to the red threshold (red = 100% bar length) instead
+    of to the actual, usually much larger context window – so your
     self-chosen warning zone is visibly filled in, rather than the bar only
     looking full near the real ~200k limit. Applies both in the normal and in
     the "live, preliminary" state.
@@ -285,9 +290,14 @@ a plain query, not a generation.
     number is deliberately **not capped at 100%**: once you exceed your own
     threshold, the display keeps climbing past it (e.g. 118%), so it's
     immediately visible by how much you've overrun your own, presumably
-    safe, boundary. The real, Claudian-reported % value stays available as a
-    tooltip on the line. Applies both in the normal and in the "live,
-    preliminary" state.
+    safe, boundary. The real (or, in the live fallback, estimated)
+    Claudian-reported % value stays available as a tooltip – shown on both
+    the % number and the bar, not the whole line. Applies both in the normal
+    and in the "live, preliminary" state.
+- **Show reset date inline (5h/7d)** (default: off). The weekday+date for
+  each reset time is always available as a tooltip on that time (5h date on
+  the 5h time, 7d date on the 7d time); this setting additionally prints it
+  inline as `14:32 (Sat, 09/13/2026)`.
 - Claude directory overridable (for `CLAUDE_CONFIG_DIR`/portable
   installations that differ from `~/.claude`)
 - **Debug logging** (console): writes refresh cycles, values read, and raw
